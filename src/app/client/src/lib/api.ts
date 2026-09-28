@@ -1,0 +1,133 @@
+// Thin typed fetch layer over the server routes in server/routes/*.ts.
+// Deliberately not using useAnalyticsQuery/config-queries — this app's
+// interactive reads/writes go through Lakebase (see server/lib), not the SQL
+// warehouse. Types here mirror the DTOs those routes actually return.
+
+export type Role = 'Estimator' | 'Lead Engineer' | 'Design Lead' | 'Admin';
+
+export interface Me {
+  email: string;
+  eligibleRoles: Role[];
+  viewAsRole: Role | null;
+  isDevFallback: boolean;
+}
+
+export interface ProjectSummary {
+  projectId: string;
+  projectName: string;
+  clientName: string;
+  siteLocation: string | null;
+  status: string;
+  yourRole: Role | null;
+  totalLines: number;
+  linesComplete: number;
+  pctComplete: number;
+  modeStage: number | null;
+  modeStageName: string | null;
+  minStage: number | null;
+  minStageName: string | null;
+}
+
+export interface ProjectDetail extends Omit<ProjectSummary, 'yourRole'> {
+  projectType: string | null;
+  targetLineCount: number | null;
+  createdAt: string;
+  effectiveRole: Role;
+  isOverride: boolean;
+  eligibleRoles: Role[];
+}
+
+export interface LineRow {
+  line_id: string;
+  project_id: string;
+  line_no: string;
+  service: string | null;
+  line_class_spec: string | null;
+  nominal_size_in: number | null;
+  material: string | null;
+  estimated_centerline_length_ft: number | null;
+  pid_reference: string | null;
+  isometric_drawing_no: string | null;
+  design_pressure_psig: number | null;
+  design_temperature_f: number | null;
+  current_stage: number;
+  is_complete: boolean;
+  latest_actor_email: string | null;
+  latest_actor_role: string | null;
+  latest_event_timestamp: string | null;
+  latest_event_type: string | null;
+}
+
+export interface LineDetail {
+  line: LineRow;
+  effectiveRole: Role;
+  isOverride: boolean;
+  stageHistory: Array<{
+    event_id: string;
+    stage_number: number;
+    stage_name: string;
+    event_type: string;
+    actor_email: string;
+    actor_role: string;
+    event_timestamp: string;
+    notes: string | null;
+  }>;
+  trueUpRecords: TrueUpRecordRow[];
+  changeLog: Array<Record<string, unknown>>;
+}
+
+export interface TrueUpRecordRow {
+  true_up_id: string;
+  true_up_type: 'PRELIMINARY' | 'FINAL';
+  estimated_centerline_length_ft: number | null;
+  actual_centerline_length_ft: number | null;
+  length_variance_pct: number | null;
+  confirmed_at: string | null;
+}
+
+interface ErrorBody {
+  error?: string;
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, {
+    ...init,
+    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({ error: res.statusText }))) as ErrorBody;
+    throw new Error(body.error ?? `Request failed: ${res.status}`);
+  }
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
+
+export const api = {
+  me: () => request<Me>('/api/me'),
+  setViewAs: (role: Role | null) =>
+    request<{ role: Role | null }>('/api/view-as', { method: 'POST', body: JSON.stringify({ role }) }),
+
+  listProjects: () => request<ProjectSummary[]>('/api/projects'),
+  getProject: (projectId: string) => request<ProjectDetail>(`/api/projects/${projectId}`),
+  listLines: (projectId: string) => request<LineRow[]>(`/api/projects/${projectId}/lines`),
+  getLine: (lineId: string) => request<LineDetail>(`/api/lines/${lineId}`),
+
+  createLine: (projectId: string, body: Record<string, unknown>) =>
+    request<{ lineId: string; lineNo: string }>(`/api/projects/${projectId}/lines`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  confirmInitial: (lineId: string, notes?: string) =>
+    request<{ lineId: string; currentStage: number }>(`/api/lines/${lineId}/confirm-initial`, {
+      method: 'POST',
+      body: JSON.stringify({ notes }),
+    }),
+  submitPreliminaryTrueUp: (lineId: string, body: Record<string, unknown>) =>
+    request(`/api/lines/${lineId}/true-up/preliminary`, { method: 'POST', body: JSON.stringify(body) }),
+  confirmPreliminaryTrueUp: (lineId: string) =>
+    request(`/api/lines/${lineId}/true-up/preliminary/confirm`, { method: 'POST', body: JSON.stringify({}) }),
+  submitFinalTrueUp: (lineId: string, body: Record<string, unknown>) =>
+    request(`/api/lines/${lineId}/true-up/final`, { method: 'POST', body: JSON.stringify(body) }),
+  confirmFinalTrueUp: (lineId: string) =>
+    request(`/api/lines/${lineId}/true-up/final/confirm`, { method: 'POST', body: JSON.stringify({}) }),
+};

@@ -42,7 +42,17 @@ this repo references.
       Lakeflow Job (`synthetic_historical_seed`), and a frozen live-data seed
       (5 active projects, 93 lines spread across all 6 stages) applied to
       Lakebase from `src/sql/lakebase/seed_live_data.sql`
-- [ ] Phase 2-3 — app skeleton, auth, stage-action forms
+- [x] Phase 2-3 — AppKit app deployed and live at
+      https://burns-piping-poc-7405608145506562.2.azure.databricksapps.com —
+      OBO identity + group-membership auth (`server/lib/auth.ts`), per-project
+      role resolution + bounded "view as" switcher (`server/lib/roles.ts`),
+      project picker, 6-stage timeline, Kanban board, line detail panel, and
+      all 6 stage-action routes (each a single Lakebase transaction). Verified
+      live end-to-end: reads, a role-gated write correctly rejected (403) then
+      accepted after switching view-as, and the resulting stage transition
+      persisted correctly. See `src/sql/lakebase/01_grant_app_access.sql` —
+      required once after first deploy so the app's service principal can
+      read/write the tables created in Phase 0.
 - [ ] Phase 4 — Lakebase → Delta CDC wiring
 - [ ] Phase 5 — dashboard
 - [ ] Phase 6 — ML model

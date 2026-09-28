@@ -1,0 +1,30 @@
+resources:
+  apps:
+    app:
+      name: burns-piping-poc
+      description: "Burns & McDonnell piping workflow PoC"
+      source_code_path: ../src/app
+
+      # Starts automatically on `bundle deploy` (a bare `bundle deploy` would
+      # otherwise leave the app created-but-stopped with no URL).
+      lifecycle:
+        started: true
+
+      # No user_api_scopes declared: user authorization is GA and on by
+      # default for every Databricks App (confirmed against the workspace's
+      # own API — explicitly listing `iam.current-user:read` /
+      # `iam.access-control:read` is rejected as INVALID_PARAMETER_VALUE
+      # because those are automatic defaults, not requestable scopes). The
+      # server-side OBO call to resolve the caller's real workspace group
+      # memberships (getRequestIdentity in server/lib/auth.ts) — the whole
+      # role-authorization model — relies on exactly those defaults, which
+      # are present with no declaration needed. No other OBO scope is needed
+      # yet (Kanban/picker reads go through the Lakebase plugin's own
+      # service-principal pool, not OBO).
+
+      resources:
+        - name: postgres
+          postgres:
+            branch: projects/${var.lakebase_project_id}/branches/${var.lakebase_branch_id}
+            database: projects/${var.lakebase_project_id}/branches/${var.lakebase_branch_id}/databases/${var.lakebase_database_id}
+            permission: CAN_CONNECT_AND_CREATE
