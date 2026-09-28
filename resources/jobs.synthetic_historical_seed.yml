@@ -1,0 +1,19 @@
+resources:
+  jobs:
+    synthetic_historical_seed:
+      name: "Piping PoC — Generate Synthetic Historical Projects (one-time)"
+      description: >-
+        One-time seed job: generates 20-30 fully-completed historical piping
+        projects (line list, stage history, true-up records, change log) used
+        only to train the stage-duration ML model. Never touches live/CDC data.
+        Re-running is idempotent (overwrite) but there's normally no reason to.
+      tasks:
+        - task_key: generate_historical
+          notebook_task:
+            notebook_path: ../src/notebooks/synthetic/generate_historical_projects.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              num_projects: "25"
+              seed: "42"
+          # no cluster config -> serverless

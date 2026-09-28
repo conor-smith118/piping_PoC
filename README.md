@@ -38,7 +38,10 @@ this repo references.
 - [x] Phase 0 — UC schema, Lakebase project + Postgres schema (REPLICA IDENTITY
       FULL confirmed on all 6 tables), live/historical/gold Delta tables + union
       views, workspace groups + membership
-- [ ] Phase 1 — synthetic historical data (20-30 closed projects) + live seed
+- [x] Phase 1 — synthetic historical data (25 closed projects, 882 lines) via a
+      Lakeflow Job (`synthetic_historical_seed`), and a frozen live-data seed
+      (5 active projects, 93 lines spread across all 6 stages) applied to
+      Lakebase from `src/sql/lakebase/seed_live_data.sql`
 - [ ] Phase 2-3 — app skeleton, auth, stage-action forms
 - [ ] Phase 4 — Lakebase → Delta CDC wiring
 - [ ] Phase 5 — dashboard
