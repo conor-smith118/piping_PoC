@@ -1,0 +1,32 @@
+bundle:
+  name: burns_piping_poc
+
+include:
+  - resources/*.yml
+  - resources/genie_spaces/*.yml
+
+variables:
+  catalog:
+    description: Unity Catalog catalog for the PoC (existing shared sandbox catalog)
+    default: css_fevm
+  schema:
+    description: Unity Catalog schema for the PoC
+    default: burns_piping_poc
+  warehouse_id:
+    description: SQL warehouse used by the app, dashboard, and Genie agents (cssSQL)
+    default: a4e59a1f13ab8b9a
+  lakebase_project_id:
+    description: Lakebase Postgres Autoscaling project backing live human data entry
+    default: burns-piping-poc
+  lakebase_branch_id:
+    default: production
+  lakebase_database_id:
+    default: databricks-postgres
+
+targets:
+  dev:
+    default: true
+    mode: production
+    workspace:
+      profile: fevm-css-demo
+      root_path: /Workspace/Users/conor.smith@databricks.com/.bundle/${bundle.name}/${bundle.target}

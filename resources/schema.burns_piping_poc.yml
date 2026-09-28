@@ -1,0 +1,9 @@
+resources:
+  schemas:
+    burns_piping_poc:
+      catalog_name: ${var.catalog}
+      name: ${var.schema}
+      comment: >-
+        Burns & McDonnell piping workflow PoC — live piping-line data (CDC'd from
+        Lakebase), synthetic historical closed projects for ML training, gold
+        rollups feeding the dashboard/Kanban, and per-project Genie views.
