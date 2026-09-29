@@ -181,15 +181,41 @@ this repo references.
       badges visibly reorder on every load — fixed by sorting
       `eligibleRoles()` into the fixed `ROLES` order.
 
+- [x] Phase 12 — the `ag` fix from Phase 11 immediately exposed a second,
+      real bug: `GET /api/projects` (`server/routes/projects.ts`) filtered
+      by "does *any* `user_project_role` row exist for this user" rather
+      than "...for one of their *currently eligible* roles" — so an
+      Estimator-only session still saw all 5 projects (matched
+      `conor.smith`'s pre-existing `'Admin'` rows) and every card's badge
+      showed the raw stored `'Admin'` value regardless of actual eligibility.
+      Fixed by adding `AND upr.role = ANY($eligible)` to both the project
+      query and the badge lookup, so they agree with `getEffectiveRole`'s
+      own reconciliation rule. Also fixed the underlying data gap that made
+      this untestable even after the query fix: `conor.smith` had zero
+      `user_project_role` rows for any role except `'Admin'` (which
+      `getEffectiveRole`'s fallback rule never actually needed a row for in
+      the first place). `generate_live_seed.py` now gives `conor.smith` one
+      real assignment per non-admin role on a different project
+      (`Estimator`→BM-L-001, `Lead Engineer`→BM-L-002, `Design
+      Lead`→BM-L-003); applied directly to the live Lakebase table via a
+      one-off `databricks jobs submit` run (local `pip install` is blocked
+      by this machine's proxy, so reused the exact `w.postgres` + psycopg2
+      pattern from `simulate_new_data`), then `refresh_silver_gold` to sync
+      it through CDC, then regenerated `seed_live_data.sql` so `reset_poc`
+      matches going forward. **Verified via direct query** (not yet a real
+      browser session): an Estimator-scoped query now returns only BM-L-001,
+      a Design-Lead-scoped query only BM-L-003.
+
 ## Known follow-ups (need your real browser, not just my CLI access)
 
-0. **Confirm the `ag`-claim fix in your own browser.** Open the app in an
-   incognito window, pick a non-Admin role (e.g. Estimator) at the login
-   prompt, and check the landing page shows just that one role and only its
-   assigned projects. I verified the decode/lookup logic in isolation and
-   confirmed the claim's real shape from your test, but haven't seen the
-   full path (real incognito login → this exact deployed code → landing
-   page) run start to finish myself.
+0. **Confirm both Phase 11 + 12 fixes together, in your own browser.** Open
+   the app in an incognito window, pick a non-Admin role (e.g. Estimator) at
+   the login prompt, and check: the landing page shows just that one role,
+   the project list shows only that role's assigned project (not all 5), and
+   its badge matches. I verified the `ag`-decode logic in isolation and the
+   `/api/projects` query fix via direct SQL, but haven't seen the full path
+   (real incognito login → this exact deployed code → landing page) run
+   start to finish myself.
 
 1. **Embedding domain allowlist.** If a dashboard iframe renders
    blank/blocked instead of the dashboard, a workspace admin needs to allow

@@ -120,15 +120,30 @@ for i in range(1, N_PROJECTS + 1):
         f"{sql_str(random.choice(PROJECT_TYPES))}, 'ACTIVE', {n_lines}, {sql_ts(created_at)});"
     )
 
-    # role assignments: conor.smith as Admin (sees/administers everything via
-    # the "Admin Piping" account-level group anyway, but an explicit row
-    # keeps the table coherent), plus one synthetic Estimator / Lead Engineer
-    # / Design Lead per project so the audit trail has believable, distinct
-    # actors.
-    roles_out.append(
-        f"INSERT INTO user_project_role (user_email, project_id, role, assigned_by) VALUES "
-        f"({sql_str('conor.smith@databricks.com')}, {sql_str(project_id)}, 'Admin', 'system');"
-    )
+    # role assignments: conor.smith gets exactly one real per-project
+    # assignment per non-admin role, spread across the first 3 projects —
+    # NOT a blanket 'Admin' row on every project. Admin access never needs
+    # an explicit row here (getEffectiveRole's fallback rule grants it to
+    # anyone eligible for Admin with no row at all — see roles.ts), so a
+    # normal, full-group-membership session still sees every project
+    # regardless. What DID need real rows: a Databricks RBAC "assume role"
+    # session narrowed to exactly one non-admin role (see ARCHITECTURE.md's
+    # "assume role" investigation) has nothing to see without one — a
+    # blanket 'Admin' row doesn't help a session narrowed to just
+    # 'Estimator', since getEffectiveRole only honors an assignment whose
+    # role is also currently eligible. Projects 4-5 deliberately get no
+    # conor.smith row at all: a narrowed session correctly sees nothing
+    # there (no assignment = no access), which is the whole point of the
+    # eligibility/assignment reconciliation rule, not a gap to fill.
+    conor_role_by_index = {1: "Estimator", 2: "Lead Engineer", 3: "Design Lead"}
+    if i in conor_role_by_index:
+        roles_out.append(
+            f"INSERT INTO user_project_role (user_email, project_id, role, assigned_by) VALUES "
+            f"({sql_str('conor.smith@databricks.com')}, {sql_str(project_id)}, "
+            f"{sql_str(conor_role_by_index[i])}, 'system');"
+        )
+    # plus one synthetic Estimator / Lead Engineer / Design Lead per project
+    # so the audit trail has believable, distinct actors.
     for role in ["Estimator", "Lead Engineer", "Design Lead"]:
         roles_out.append(
             f"INSERT INTO user_project_role (user_email, project_id, role, assigned_by) VALUES "

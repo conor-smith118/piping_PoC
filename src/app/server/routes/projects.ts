@@ -1,6 +1,6 @@
 import type { AppKitHandle } from '../lib/appkitTypes';
 import { getRequestIdentity } from '../lib/auth';
-import { eligibleRoles, getEffectiveRole, STAGE_NAMES } from '../lib/roles';
+import { eligibleRoles, getEffectiveRole, STAGE_NAMES, type Role } from '../lib/roles';
 
 interface ProjectRow {
   project_id: string;
@@ -92,20 +92,30 @@ function projectDto(p: ProjectRow) {
 
 export function registerProjectRoutes(appkit: AppKitHandle) {
   appkit.server.extend((app) => {
-    // Project picker — only projects the user has any role on; Admins see all.
+    // Project picker — only projects the user has a CURRENTLY ELIGIBLE role
+    // on; Admins see all. Both the project list and the `yourRole` badge
+    // must agree with getEffectiveRole's own reconciliation rule (roles.ts)
+    // — filtering by `upr.user_email = $1` alone, without also requiring
+    // `upr.role = ANY(eligible)`, was a real bug: a user's stored
+    // `user_project_role` row can be for a role they're not currently
+    // eligible for (e.g. an Admin-eligible-by-default row from seed data,
+    // now viewed via a Databricks "assume role" session narrowed to just
+    // Estimator) — that row should NOT count as access, and the badge
+    // should NOT display it, but an unfiltered join/lookup did both.
     app.get('/api/projects', async (req, res) => {
       try {
         const identity = await getRequestIdentity(req);
-        const isAdmin = eligibleRoles(identity.groups).includes('Admin');
+        const eligible = eligibleRoles(identity.groups);
+        const isAdmin = eligible.includes('Admin');
 
         const { rows: projects } = await appkit.lakebase.query<ProjectRow>(
           isAdmin
             ? 'SELECT * FROM projects ORDER BY project_name'
             : `SELECT p.* FROM projects p
                JOIN user_project_role upr ON upr.project_id = p.project_id
-               WHERE upr.user_email = $1
+               WHERE upr.user_email = $1 AND upr.role = ANY($2)
                ORDER BY p.project_name`,
-          isAdmin ? [] : [identity.email],
+          isAdmin ? [] : [identity.email, eligible],
         );
 
         const rollups = await rollupForProjects(appkit, projects.map((p) => p.project_id));
@@ -113,7 +123,9 @@ export function registerProjectRoutes(appkit: AppKitHandle) {
           'SELECT project_id, role FROM user_project_role WHERE user_email = $1',
           [identity.email],
         );
-        const roleByProject = new Map(roleRows.map((r) => [r.project_id, r.role]));
+        const roleByProject = new Map(
+          roleRows.filter((r) => eligible.includes(r.role as Role)).map((r) => [r.project_id, r.role]),
+        );
 
         res.json(
           projects.map((p) => ({

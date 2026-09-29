@@ -424,6 +424,40 @@ made the landing page's role badges visibly reorder on every load. Fixed in
 group membership, rather than building the result in whatever order the API
 happened to return.
 
+**A second, more serious bug the `ag` claim immediately exposed** (only
+possible to hit once assume-role sessions actually worked): `GET
+/api/projects` (`server/routes/projects.ts`) filtered projects by "does *any*
+`user_project_role` row exist for this user" rather than "does a row exist
+for one of their *currently eligible* roles." `conor.smith` has a
+`user_project_role` row on every project — originally all `'Admin'`, kept
+mostly out of habit from before `getEffectiveRole`'s fallback rule existed
+(that rule grants Admin access with **no row at all**, so the explicit rows
+were always redundant for Admin specifically). Once assumed down to just
+`Estimator` via `ag`, that unfiltered join still matched every project (a row
+existed, just for a role no longer eligible), the picker showed all 5 instead
+of none, and the `yourRole` badge still showed the raw stored `'Admin'`
+value instead of the actual effective role — so a session that had correctly
+narrowed to Estimator for `/api/me` was then contradicted by the project
+list. Fixed by adding `AND upr.role = ANY($eligible)` to the query and the
+same filter to the badge lookup, so both agree with `getEffectiveRole`'s own
+reconciliation rule instead of re-deriving a subtly different one.
+
+Also updated the seed data to make this testable at all: `conor.smith` had
+zero `user_project_role` rows for any role other than `'Admin'`, so even
+after the query fix, an assumed-Estimator session would correctly see *zero*
+projects — technically correct, but not useful for demoing/testing.
+`generate_live_seed.py` now gives `conor.smith` one real assignment per
+non-admin role, on a different project each (`Estimator` on BM-L-001,
+`Lead Engineer` on BM-L-002, `Design Lead` on BM-L-003) instead of a blanket
+`'Admin'` row everywhere; BM-L-004/005 get no `conor.smith` row at all,
+relying entirely on the fallback rule for Admin-eligible sessions. Applied
+directly to the live Lakebase table (a one-off `UPDATE`/`DELETE`, via an
+ad-hoc `databricks jobs submit` run — the same `w.postgres.*` + psycopg2
+pattern as `simulate_new_data`/`reset_poc`, since local `pip install
+psycopg2-binary` is blocked by this machine's proxy setup) and regenerated
+into `seed_live_data.sql` so `reset_poc` stays consistent with it going
+forward.
+
 **"View as role" design — bounded, not a superuser bypass:** visible only to
 `Admin Piping`-group members (displayed in-app as the "Admin" role); the dropdown
 only offers roles the tester is *actually* a group-member of.
