@@ -1,0 +1,18 @@
+resources:
+  jobs:
+    ml_batch_inference:
+      name: "Piping PoC — Batch Score Stage-Duration Predictions"
+      description: >-
+        Scores every live in-flight line's current + remaining hypothetical
+        stages with stage_duration_model@prod, rolls up an estimated
+        completion timestamp, and overwrites gold_ml_predictions. Chained
+        after simulate_new_data (Phase 8) and independently runnable;
+        manual-trigger only — no schedule block.
+      tasks:
+        - task_key: score
+          notebook_task:
+            notebook_path: ../src/notebooks/ml/batch_score_predictions.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+          # no cluster config -> serverless

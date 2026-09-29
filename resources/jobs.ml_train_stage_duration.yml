@@ -1,0 +1,17 @@
+resources:
+  jobs:
+    ml_train_stage_duration:
+      name: "Piping PoC — Train Stage-Duration Model"
+      description: >-
+        Builds ml_stage_transition_features from historical closed projects,
+        trains an XGBoost regressor (log(duration_hours)) via Optuna, and
+        registers it to UC as stage_duration_model @prod. Manual-trigger only
+        (occasional retrain) — no schedule block.
+      tasks:
+        - task_key: train
+          notebook_task:
+            notebook_path: ../src/notebooks/ml/train_stage_duration_model.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+          # no cluster config -> serverless

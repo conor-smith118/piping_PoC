@@ -1,0 +1,1105 @@
+{
+  "version": 2,
+  "config": {
+    "sample_questions": [
+      {
+        "id": "1835bf919831560c8bd3401ace35373c",
+        "question": [
+          "How many lines are still in Initial Data Entry?"
+        ]
+      },
+      {
+        "id": "43ad8f99e95b544c953c8a9c60524f50",
+        "question": [
+          "Who confirmed the final true-up for a given line, and when?"
+        ]
+      },
+      {
+        "id": "6b3a392672cb521b8d66663fa0628c23",
+        "question": [
+          "What's the estimated time remaining for a given line?"
+        ]
+      },
+      {
+        "id": "c77e2a13ac815dd4bdda922b8abe38b1",
+        "question": [
+          "Which lines have been sitting longest in their current stage?"
+        ]
+      },
+      {
+        "id": "c7c153ec24795d89beea498ddf7d4c9c",
+        "question": [
+          "Which lines have the largest true-up variance, and what was the reason?"
+        ]
+      }
+    ]
+  },
+  "data_sources": {
+    "tables": [
+      {
+        "identifier": "css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines",
+        "column_configs": [
+          {
+            "column_name": "current_stage",
+            "description": [
+              "Numeric stage 1-6 the line is currently at in the estimate -> confirm -> true-up workflow."
+            ],
+            "synonyms": [
+              "stage number"
+            ]
+          },
+          {
+            "column_name": "current_stage_name",
+            "description": [
+              "Human-readable name of the line's current workflow stage: Initial Data Entry, Initial Engineer Confirmation, Preliminary True-Up Complete, Engineer Prelim True-Up Confirmation, Final True-Up Complete, or Engineer Final Confirmation."
+            ],
+            "synonyms": [
+              "stage",
+              "status",
+              "workflow stage"
+            ],
+            "enable_entity_matching": true,
+            "enable_format_assistance": true
+          },
+          {
+            "column_name": "data_origin",
+            "exclude": true
+          },
+          {
+            "column_name": "estimated_centerline_length_ft",
+            "description": [
+              "Estimator's baseline centerline pipe length in feet, before routing \u2014 the value true-ups reconcile against."
+            ],
+            "synonyms": [
+              "estimated length",
+              "baseline length"
+            ]
+          },
+          {
+            "column_name": "final_length_variance_pct",
+            "description": [
+              "Percent variance between estimated and actual centerline length at the FINAL true-up. NULL until the line reaches stage 5."
+            ],
+            "synonyms": [
+              "final variance"
+            ]
+          },
+          {
+            "column_name": "is_complete",
+            "description": [
+              "True once the line has passed Engineer Final Confirmation (stage 6)."
+            ],
+            "synonyms": [
+              "done",
+              "finished",
+              "complete"
+            ]
+          },
+          {
+            "column_name": "latest_event_actor_email",
+            "description": [
+              "Email of whoever performed the most recent action on this line."
+            ],
+            "synonyms": [
+              "last actor",
+              "who last touched this"
+            ]
+          },
+          {
+            "column_name": "latest_event_actor_role",
+            "description": [
+              "Role (Estimator, Lead Engineer, or Design Lead) of whoever performed the most recent action."
+            ],
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "latest_event_timestamp",
+            "description": [
+              "When the most recent stage action was completed. Use this to find lines that have been sitting the longest in their current stage (oldest timestamp = longest wait)."
+            ],
+            "synonyms": [
+              "last updated",
+              "last action time"
+            ]
+          },
+          {
+            "column_name": "latest_event_type",
+            "exclude": true
+          },
+          {
+            "column_name": "line_class_spec",
+            "description": [
+              "Piping class/spec, e.g. 'Class 300 CS'."
+            ],
+            "synonyms": [
+              "pipe class",
+              "line class",
+              "spec"
+            ],
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "line_id",
+            "description": [
+              "Internal surrogate key for the line. Join to stage_history/true_up on this."
+            ]
+          },
+          {
+            "column_name": "line_no",
+            "description": [
+              "Human-readable line number (e.g. L-001) \u2014 the primary way users refer to a specific line."
+            ],
+            "synonyms": [
+              "line number"
+            ],
+            "enable_entity_matching": true,
+            "enable_format_assistance": true
+          },
+          {
+            "column_name": "material",
+            "description": [
+              "Pipe material, e.g. Carbon Steel, Stainless 316."
+            ],
+            "synonyms": [
+              "pipe material"
+            ],
+            "enable_entity_matching": true,
+            "enable_format_assistance": true
+          },
+          {
+            "column_name": "nominal_size_in",
+            "description": [
+              "Nominal pipe size in inches (NPS)."
+            ],
+            "synonyms": [
+              "pipe size",
+              "NPS",
+              "diameter"
+            ]
+          },
+          {
+            "column_name": "prelim_length_variance_pct",
+            "description": [
+              "Percent variance between estimated and actual centerline length at the PRELIMINARY true-up: (actual - estimated) / estimated * 100. NULL until the line reaches stage 3."
+            ],
+            "synonyms": [
+              "prelim variance",
+              "preliminary true-up variance"
+            ]
+          },
+          {
+            "column_name": "project_id",
+            "description": [
+              "Project identifier. This agent is scoped to a single project, so this column is always the same value."
+            ]
+          },
+          {
+            "column_name": "service",
+            "description": [
+              "Process service/fluid carried by the line (e.g. Fuel Gas, Cooling Water)."
+            ],
+            "synonyms": [
+              "fluid",
+              "process service"
+            ],
+            "enable_entity_matching": true,
+            "enable_format_assistance": true
+          }
+        ]
+      },
+      {
+        "identifier": "css_fevm.burns_piping_poc.vw_genie_bm_l_002_predictions",
+        "column_configs": [
+          {
+            "column_name": "current_stage",
+            "description": [
+              "The stage the line was at when this prediction was made."
+            ]
+          },
+          {
+            "column_name": "line_id",
+            "description": [
+              "Which line this prediction is for."
+            ]
+          },
+          {
+            "column_name": "model_version",
+            "exclude": true
+          },
+          {
+            "column_name": "predicted_completion_ts",
+            "description": [
+              "Model-predicted date/time this line will reach full completion."
+            ],
+            "synonyms": [
+              "estimated completion date",
+              "when will this finish"
+            ]
+          },
+          {
+            "column_name": "predicted_remaining_hours",
+            "description": [
+              "Model-predicted hours remaining until this line reaches Engineer Final Confirmation (stage 6)."
+            ],
+            "synonyms": [
+              "time remaining",
+              "ETA",
+              "how much longer"
+            ]
+          },
+          {
+            "column_name": "project_id",
+            "description": [
+              "Project identifier \u2014 always the same value in this agent."
+            ]
+          },
+          {
+            "column_name": "scored_at",
+            "description": [
+              "When this prediction was generated \u2014 predictions refresh periodically, not in real time."
+            ],
+            "synonyms": [
+              "prediction date",
+              "last scored"
+            ]
+          }
+        ]
+      },
+      {
+        "identifier": "css_fevm.burns_piping_poc.vw_genie_bm_l_002_stage_history",
+        "column_configs": [
+          {
+            "column_name": "actor_email",
+            "description": [
+              "Who performed this action."
+            ],
+            "synonyms": [
+              "who did this",
+              "performed by"
+            ]
+          },
+          {
+            "column_name": "actor_role",
+            "description": [
+              "Role of whoever performed this action: Estimator, Lead Engineer, or Design Lead."
+            ],
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "data_origin",
+            "exclude": true
+          },
+          {
+            "column_name": "event_id",
+            "exclude": true
+          },
+          {
+            "column_name": "event_timestamp",
+            "description": [
+              "When this stage action was completed. Use for audit-trail / 'who confirmed X and when' questions."
+            ],
+            "synonyms": [
+              "when",
+              "timestamp",
+              "date"
+            ]
+          },
+          {
+            "column_name": "event_type",
+            "exclude": true
+          },
+          {
+            "column_name": "line_id",
+            "description": [
+              "Which line this event belongs to."
+            ]
+          },
+          {
+            "column_name": "notes",
+            "description": [
+              "Optional free-text notes attached to the action (usually empty)."
+            ]
+          },
+          {
+            "column_name": "project_id",
+            "description": [
+              "Project identifier \u2014 always the same value in this agent."
+            ]
+          },
+          {
+            "column_name": "stage_name",
+            "description": [
+              "Human-readable name of the stage this event completed."
+            ],
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "stage_number",
+            "description": [
+              "1-6, the stage this event completed."
+            ],
+            "synonyms": [
+              "stage"
+            ]
+          }
+        ]
+      },
+      {
+        "identifier": "css_fevm.burns_piping_poc.vw_genie_bm_l_002_true_up",
+        "column_configs": [
+          {
+            "column_name": "actual_centerline_length_ft",
+            "description": [
+              "As-routed centerline pipe length in feet for this true-up round."
+            ],
+            "synonyms": [
+              "actual length",
+              "routed length"
+            ]
+          },
+          {
+            "column_name": "changed_at",
+            "description": [
+              "When the change/reason entry was logged."
+            ]
+          },
+          {
+            "column_name": "changed_by",
+            "description": [
+              "Who logged the change/reason entry."
+            ]
+          },
+          {
+            "column_name": "confirmed_at",
+            "description": [
+              "When this true-up was confirmed. NULL if not yet confirmed."
+            ],
+            "synonyms": [
+              "confirmation date"
+            ]
+          },
+          {
+            "column_name": "confirmed_by",
+            "description": [
+              "Who (Lead Engineer) confirmed this true-up. NULL if not yet confirmed."
+            ],
+            "synonyms": [
+              "who confirmed"
+            ]
+          },
+          {
+            "column_name": "data_origin",
+            "exclude": true
+          },
+          {
+            "column_name": "estimated_centerline_length_ft",
+            "description": [
+              "Baseline centerline pipe length in feet for this true-up round."
+            ],
+            "synonyms": [
+              "estimated length"
+            ]
+          },
+          {
+            "column_name": "fitting_detail",
+            "exclude": true
+          },
+          {
+            "column_name": "flange_count_actual",
+            "description": [
+              "Actual flange count for this true-up round."
+            ],
+            "synonyms": [
+              "flange count"
+            ]
+          },
+          {
+            "column_name": "flange_count_estimated",
+            "description": [
+              "Estimated flange count for this true-up round."
+            ],
+            "synonyms": [
+              "flange count"
+            ]
+          },
+          {
+            "column_name": "isometric_drawing_ref",
+            "description": [
+              "Reference to the isometric drawing for this line/true-up."
+            ],
+            "synonyms": [
+              "isometric",
+              "iso drawing"
+            ]
+          },
+          {
+            "column_name": "length_variance_pct",
+            "description": [
+              "Percent variance: (actual - estimated) / estimated * 100. Positive means the actual routed length came in longer than estimated."
+            ],
+            "synonyms": [
+              "variance",
+              "length variance",
+              "how far off"
+            ]
+          },
+          {
+            "column_name": "line_id",
+            "description": [
+              "Which line this true-up round belongs to."
+            ]
+          },
+          {
+            "column_name": "mto_cost_actual_usd",
+            "description": [
+              "Material takeoff (MTO) cost in USD, actual."
+            ],
+            "synonyms": [
+              "MTO cost",
+              "material cost"
+            ]
+          },
+          {
+            "column_name": "mto_cost_estimated_usd",
+            "description": [
+              "Material takeoff (MTO) cost in USD, estimated."
+            ],
+            "synonyms": [
+              "MTO cost",
+              "material cost"
+            ]
+          },
+          {
+            "column_name": "mto_weight_actual_lb",
+            "description": [
+              "Material takeoff (MTO) weight in pounds, actual."
+            ],
+            "synonyms": [
+              "MTO weight",
+              "pipe weight"
+            ]
+          },
+          {
+            "column_name": "mto_weight_estimated_lb",
+            "description": [
+              "Material takeoff (MTO) weight in pounds, estimated."
+            ],
+            "synonyms": [
+              "MTO weight",
+              "pipe weight"
+            ]
+          },
+          {
+            "column_name": "performed_at",
+            "description": [
+              "When this true-up was performed."
+            ]
+          },
+          {
+            "column_name": "performed_by",
+            "description": [
+              "Who (Design Lead) performed this true-up."
+            ]
+          },
+          {
+            "column_name": "pid_ref",
+            "description": [
+              "Reference to the P&ID for this line/true-up."
+            ],
+            "synonyms": [
+              "P&ID",
+              "PID reference"
+            ]
+          },
+          {
+            "column_name": "project_id",
+            "description": [
+              "Project identifier \u2014 always the same value in this agent."
+            ]
+          },
+          {
+            "column_name": "reason_category",
+            "description": [
+              "Category of why a reconciliation change occurred: DESIGN_CHANGE, CONSTRUCTABILITY, ESTIMATING_ERROR, or OTHER. NULL if no change was logged for this true-up."
+            ],
+            "synonyms": [
+              "reason",
+              "why the change",
+              "change category"
+            ],
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "reason_text",
+            "description": [
+              "Free-text explanation of the change, if logged."
+            ],
+            "synonyms": [
+              "reason details"
+            ]
+          },
+          {
+            "column_name": "support_detail",
+            "exclude": true
+          },
+          {
+            "column_name": "true_up_id",
+            "exclude": true
+          },
+          {
+            "column_name": "true_up_type",
+            "description": [
+              "PRELIMINARY (after Basic Routing) or FINAL (after Full Routing) true-up round."
+            ],
+            "synonyms": [
+              "prelim or final",
+              "true-up round"
+            ],
+            "enable_entity_matching": true
+          },
+          {
+            "column_name": "valve_detail",
+            "exclude": true
+          },
+          {
+            "column_name": "weld_count_actual",
+            "description": [
+              "Actual weld count for this true-up round."
+            ],
+            "synonyms": [
+              "weld count"
+            ]
+          },
+          {
+            "column_name": "weld_count_estimated",
+            "description": [
+              "Estimated weld count for this true-up round."
+            ],
+            "synonyms": [
+              "weld count"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "instructions": {
+    "example_question_sqls": [
+      {
+        "id": "153edbf4277b59f7b57678a921afe452",
+        "question": [
+          "How many lines are still in Initial Data Entry?"
+        ],
+        "sql": [
+          "SELECT COUNT(*) AS n FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines l WHERE l.current_stage_name = 'Initial Data Entry'"
+        ]
+      },
+      {
+        "id": "1679ee2e9cbf584eb0dd6dfc220e37fd",
+        "question": [
+          "Which line has the longest estimated time remaining, and how long?"
+        ],
+        "sql": [
+          "SELECT l.line_no, p.predicted_remaining_hours, p.predicted_completion_ts FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_predictions p JOIN css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines l ON l.line_id = p.line_id ORDER BY p.predicted_remaining_hours DESC LIMIT 1"
+        ]
+      },
+      {
+        "id": "5a0dce42a3ba52ceb3ce9df54c0579c9",
+        "question": [
+          "Which line's final true-up was most recently confirmed, and by whom?"
+        ],
+        "sql": [
+          "SELECT l.line_no, t.confirmed_by, t.confirmed_at FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_true_up t JOIN css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines l ON l.line_id = t.line_id WHERE t.true_up_type = 'FINAL' AND t.confirmed_by IS NOT NULL ORDER BY t.confirmed_at DESC LIMIT 1"
+        ]
+      },
+      {
+        "id": "edbac19c4a1d5efd977e9195fd480954",
+        "question": [
+          "Which line has the largest preliminary true-up variance?"
+        ],
+        "sql": [
+          "SELECT l.line_no, l.prelim_length_variance_pct FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines l WHERE l.prelim_length_variance_pct IS NOT NULL ORDER BY ABS(l.prelim_length_variance_pct) DESC LIMIT 1"
+        ]
+      },
+      {
+        "id": "fe53f44fafca506da48a9234ecc3cbd7",
+        "question": [
+          "Which line has been sitting longest in its current stage?"
+        ],
+        "sql": [
+          "SELECT l.line_no, l.current_stage_name, l.latest_event_timestamp FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines l WHERE NOT l.is_complete ORDER BY l.latest_event_timestamp ASC LIMIT 1"
+        ]
+      }
+    ],
+    "text_instructions": [
+      {
+        "id": "8445ab67a9f05ec5be51eeb129c87faa",
+        "content": [
+          "## PURPOSE",
+          "- Answer questions about piping project BM-L-002's line list, stage progress, and true-up reconciliation.",
+          "- Users are EPC project team members (Estimator/Lead Engineer/Design Lead/Admin) fluent in piping terminology.",
+          "",
+          "## DATA QUALITY NOTES",
+          "- css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines.prelim_length_variance_pct and final_length_variance_pct are NULL until the line reaches stage 3 / stage 5 respectively \u2014 not a data error.",
+          "- css_fevm.burns_piping_poc.vw_genie_bm_l_002_true_up.confirmed_by/confirmed_at are NULL for true-ups awaiting Lead Engineer confirmation \u2014 not a data error.",
+          "- css_fevm.burns_piping_poc.vw_genie_bm_l_002_predictions may be empty between batch-scoring runs; state that predictions are unavailable rather than treating an empty result as zero lines.",
+          "",
+          "## CONSTRAINTS",
+          "- Never guess at rows not present in css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines, css_fevm.burns_piping_poc.vw_genie_bm_l_002_stage_history, css_fevm.burns_piping_poc.vw_genie_bm_l_002_true_up, or css_fevm.burns_piping_poc.vw_genie_bm_l_002_predictions \u2014 this agent only has data for project BM-L-002."
+        ]
+      }
+    ]
+  },
+  "benchmarks": {
+    "questions": [
+      {
+        "id": "077a11ab4385521f81a1e91b8d49ea4a",
+        "question": [
+          "Which lines use Stainless 316?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT line_no FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines WHERE material = 'Stainless 316'"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "0f9d54f9014b538c8c8eed43dee97710",
+        "question": [
+          "Which lines have true-ups that are not yet confirmed?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT l.line_no, t.true_up_type FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_true_up t JOIN css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines l ON l.line_id = t.line_id WHERE t.confirmed_by IS NULL"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "1820df8e7cae5c6aaa6a495a05fb1ef6",
+        "question": [
+          "How many lines are in Preliminary True-Up Complete?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT COUNT(*) FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines WHERE current_stage_name = 'Preliminary True-Up Complete'"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "1c672451bd3750029e6047ad6ab37fe6",
+        "question": [
+          "How many stage transitions has line L-002 gone through?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT COUNT(*) FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_stage_history h JOIN css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines l ON l.line_id = h.line_id WHERE l.line_no = 'L-002'"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "1fb79aa1bf685caa949c447f4ec4b4a5",
+        "question": [
+          "What's the isometric drawing reference for the most recently performed true-up?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT l.line_no, t.isometric_drawing_ref FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_true_up t JOIN css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines l ON l.line_id = t.line_id ORDER BY t.performed_at DESC LIMIT 1"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "1fc7e1a8f5465c18a41b5a3878316e0c",
+        "question": [
+          "Which lines have a preliminary variance greater than 5 percent in magnitude?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT line_no, prelim_length_variance_pct FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines WHERE ABS(prelim_length_variance_pct) > 5"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "2cc8700bd4f458848dec96269778c81a",
+        "question": [
+          "What stage is line L-005 at?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT current_stage_name FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines WHERE line_no = 'L-005'"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "2f384b8aafd754e3a41c265251251f6a",
+        "question": [
+          "How many lines were last touched by the Design Lead?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT COUNT(*) FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines WHERE latest_event_actor_role = 'Design Lead'"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "33c102add5c95c889fe73cbfc6940cdc",
+        "question": [
+          "How many lines have not yet started their preliminary true-up (stage less than 3)?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT COUNT(*) FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines WHERE current_stage < 3"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "385dc70e17d259fc8fcdb408f8e35a2e",
+        "question": [
+          "Who is the most recent actor to touch this project, and when?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT latest_event_actor_email, latest_event_timestamp FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines ORDER BY latest_event_timestamp DESC LIMIT 1"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "49f2a32f1d1852e99f66c411ceccdbc7",
+        "question": [
+          "What reasons have been logged for true-up changes, and how many of each?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT reason_category, COUNT(*) FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_true_up WHERE reason_category IS NOT NULL GROUP BY reason_category"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "5026743af49f5016a3e268d1c420f180",
+        "question": [
+          "What is line L-001's material and nominal size?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT material, nominal_size_in FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines WHERE line_no = 'L-001'"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "56bd9b0a35ac55ed8748bc1bd63f6913",
+        "question": [
+          "What is the total MTO cost variance across all true-ups?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT SUM(mto_cost_actual_usd - mto_cost_estimated_usd) FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_true_up"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "6ce01f14069550a498b3cca76d9a943d",
+        "question": [
+          "What's the P&ID reference for the most recently performed true-up?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT l.line_no, t.pid_ref FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_true_up t JOIN css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines l ON l.line_id = t.line_id ORDER BY t.performed_at DESC LIMIT 1"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "78cdc4608ca55d799982212ab588c04d",
+        "question": [
+          "What stage is line L-010 at?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT current_stage_name FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines WHERE line_no = 'L-010'"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "8027e41101425dc182ed4199a2f6384b",
+        "question": [
+          "Which line has the largest final true-up variance?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT line_no, final_length_variance_pct FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines WHERE final_length_variance_pct IS NOT NULL ORDER BY ABS(final_length_variance_pct) DESC LIMIT 1"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "83d230674562543190087332d4d409c9",
+        "question": [
+          "What's the total estimated centerline length across all lines in this project?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT SUM(estimated_centerline_length_ft) FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "881c7c6fc0ee5fe58ed6e302b666cb27",
+        "question": [
+          "Which lines have been in their current stage for more than 5 days?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT line_no, current_stage_name FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines WHERE NOT is_complete AND datediff(current_timestamp(), latest_event_timestamp) > 5"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "934f3bd137a7584eb7e2c6f9356c4d09",
+        "question": [
+          "Which lines have a design-change reason logged?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT DISTINCT l.line_no FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_true_up t JOIN css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines l ON l.line_id = t.line_id WHERE t.reason_category = 'DESIGN_CHANGE'"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "a0fff42595aa54f3880133cbf5749d6b",
+        "question": [
+          "Which line's preliminary true-up was most recently performed, and by whom?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT l.line_no, t.performed_by, t.performed_at FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_true_up t JOIN css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines l ON l.line_id = t.line_id WHERE t.true_up_type = 'PRELIMINARY' ORDER BY t.performed_at DESC LIMIT 1"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "a30eddcd0700520388e2e1fc0d05a4cb",
+        "question": [
+          "Which line had the biggest MTO cost overrun?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT l.line_no, (t.mto_cost_actual_usd - t.mto_cost_estimated_usd) AS overrun FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_true_up t JOIN css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines l ON l.line_id = t.line_id ORDER BY overrun DESC LIMIT 1"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "ab08642183cc5088980b085edc9f9ea7",
+        "question": [
+          "What is the average preliminary length variance across all lines?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT AVG(prelim_length_variance_pct) FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "b0caf446e10c52c486691abb6d7fce68",
+        "question": [
+          "Which line has the largest preliminary true-up variance?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT line_no, prelim_length_variance_pct FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines WHERE prelim_length_variance_pct IS NOT NULL ORDER BY ABS(prelim_length_variance_pct) DESC LIMIT 1"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "b64188c0d170555eaa5933d7c681783e",
+        "question": [
+          "How many lines are fully complete?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT COUNT(*) FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines WHERE is_complete = true"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "c0b5b7058b60590a985350456d49033d",
+        "question": [
+          "How many distinct services are represented in this project's line list?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT COUNT(DISTINCT service) FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "c52240ec471e57c886e4df8a4ffd5c1a",
+        "question": [
+          "How many lines are in Initial Data Entry?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT COUNT(*) FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines WHERE current_stage_name = 'Initial Data Entry'"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "c8c4f4518f2057c38b95d0a178428935",
+        "question": [
+          "Which line has the longest predicted remaining time?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT l.line_no, p.predicted_remaining_hours FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_predictions p JOIN css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines l ON l.line_id = p.line_id ORDER BY p.predicted_remaining_hours DESC LIMIT 1"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "d9d8cca53e145dffa33e3031f4134623",
+        "question": [
+          "How many lines are in Initial Engineer Confirmation?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT COUNT(*) FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines WHERE current_stage_name = 'Initial Engineer Confirmation'"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "dcd34f4be2e15cde8401a7c72510b87f",
+        "question": [
+          "Who was the Estimator who entered line L-001's initial data?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT h.actor_email FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_stage_history h JOIN css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines l ON l.line_id = h.line_id WHERE l.line_no = 'L-001' AND h.stage_number = 1"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "e2fd1eb4344f5643935d5e4ebfb74204",
+        "question": [
+          "Which line has been sitting longest in its current stage?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT line_no, current_stage_name, latest_event_timestamp FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines WHERE NOT is_complete ORDER BY latest_event_timestamp ASC LIMIT 1"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "ef5e41e9bdf2529492b3398d42005ac4",
+        "question": [
+          "Which line has the shortest estimated time remaining?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT l.line_no, p.predicted_remaining_hours FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_predictions p JOIN css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines l ON l.line_id = p.line_id ORDER BY p.predicted_remaining_hours ASC LIMIT 1"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "f1ba4bf37bb550f8984d5b81b8eaf80b",
+        "question": [
+          "Which line's final true-up was most recently confirmed, and by whom?"
+        ],
+        "answer": [
+          {
+            "format": "SQL",
+            "content": [
+              "SELECT l.line_no, t.confirmed_by, t.confirmed_at FROM css_fevm.burns_piping_poc.vw_genie_bm_l_002_true_up t JOIN css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines l ON l.line_id = t.line_id WHERE t.true_up_type = 'FINAL' AND t.confirmed_by IS NOT NULL ORDER BY t.confirmed_at DESC LIMIT 1"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

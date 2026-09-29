@@ -1,0 +1,11 @@
+resources:
+  genie_spaces:
+    bm_l_003:
+      title: "Piping PoC — BM-L-003"
+      description: >-
+        Curated Genie agent scoped to piping project BM-L-003: line list,
+        stage progress, true-up reconciliation, and ML-predicted completion
+        times.
+      parent_path: /Workspace/Users/conor.smith@databricks.com/piping_poc_genie
+      warehouse_id: ${var.warehouse_id}
+      file_path: ../../src/genie/bm_l_003.geniespace.json

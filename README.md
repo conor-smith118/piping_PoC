@@ -69,8 +69,35 @@ this repo references.
       follow-ups" below): the exact filter query-parameter encoding, and
       whether this app's domain needs a workspace-admin embedding-allowlist
       addition.
-- [ ] Phase 6 — ML model
-- [ ] Phase 7 — Genie agents
+- [x] Phase 6 — ML model. `ml_train_stage_duration` (Lakeflow Job): builds
+      `ml_stage_transition_features` from historical closed projects (~5,300
+      rows), trains an XGBoost regressor on `log(duration_hours)` via 20
+      Optuna trials, registers `css_fevm.burns_piping_poc.stage_duration_model`
+      to UC with a `@prod` alias. `ml_batch_inference`: scores every live
+      in-flight line's current + remaining hypothetical stages, rolls up an
+      estimated completion timestamp, writes `gold_ml_predictions` (83 rows
+      after the first run). Hit and fixed 5 real issues along the way —
+      `xgboost`/`optuna` not pre-installed on serverless, and a cluster of
+      int32-vs-int64 / bool-vs-int dtype mismatches between Spark's
+      `.toPandas()` output and plain-Python reconstruction — see the comments
+      in `train_stage_duration_model.py` / `batch_score_predictions.py`.
+      **Note:** `set_registered_model_alias` silently no-op'd inside the
+      training notebook (unclear why — the run reported success with no
+      error); the `@prod` alias was set manually via
+      `databricks registered-models set-alias`. Re-verify after any retrain.
+- [x] Phase 7 — Genie agents. One curated agent per live project (5 total),
+      each scoped to 4 static per-project views (`vw_genie_<project>_lines` /
+      `_stage_history` / `_true_up` / `_predictions`,
+      `src/sql/ddl/05_genie_project_views.sql`) — full audit trail and
+      true-up detail, not just the dashboard's aggregated metrics, per the
+      "broader tables, appropriately scoped" ask. Designed once against
+      BM-L-001 (column_configs, 5 example-query shapes, 32-item benchmark
+      suite per agent — all 185 SQL statements across all 5 agents validated
+      against the real warehouse before any agent was created), then
+      templated via `src/genie/build_agent_config.py`. Managed as code via
+      `resources/genie_spaces/*.genie-space.yml` + `src/genie/*.geniespace.json`
+      — `bundle deploy` creates/updates all 5. Verified live: asked each
+      agent a real question, got correct answers with clean generated SQL.
 - [ ] Phase 8 — simulate/reset jobs
 - [ ] Phase 9 — polish
 
