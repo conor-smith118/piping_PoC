@@ -9,13 +9,7 @@ import {
 } from '@databricks/appkit-ui/react';
 import type { Me, Role } from '../lib/api';
 import { api } from '../lib/api';
-
-const ROLE_VARIANT: Record<Role, 'default' | 'secondary' | 'outline'> = {
-  Estimator: 'secondary',
-  'Lead Engineer': 'default',
-  'Design Lead': 'default',
-  Admin: 'outline',
-};
+import { ROLE_VARIANT } from '../lib/roleVariant';
 
 /**
  * Top-right role badge. Shows the caller's effective role for the current
