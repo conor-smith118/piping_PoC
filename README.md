@@ -98,7 +98,20 @@ this repo references.
       `resources/genie_spaces/*.genie-space.yml` + `src/genie/*.geniespace.json`
       — `bundle deploy` creates/updates all 5. Verified live: asked each
       agent a real question, got correct answers with clean generated SQL.
-- [ ] Phase 8 — simulate/reset jobs
+- [x] Phase 8a — per-project Genie chat in the app. The dashboard has no
+      native Genie link (a static, one-per-dashboard mechanism incompatible
+      with the shared/parameterized dashboard from Phase 5) — instead, added
+      AppKit's `genie()` plugin with a `spaces` map keyed by literal
+      `project_id`, plus a `GenieChat` panel (`components/GenieAssistant.tsx`)
+      on a new "Ask Genie" tab in `ProjectView.tsx`'s Project Insights card.
+      Required a `dashboards.genie` OBO scope and per-space `CAN_RUN`
+      permissions for all 4 workspace groups on each
+      `resources/genie_spaces/*.genie-space.yml`. Verified live: the same
+      question sent to the app's `BM-L-001` and `BM-L-002` aliases correctly
+      returned two different, project-scoped answers (22 vs. 19 lines,
+      correct `spaceId`/view for each) — see `docs/ARCHITECTURE.md`'s "Genie
+      chat integration in the app" section.
+- [ ] Phase 8b — simulate/reset jobs
 - [ ] Phase 9 — polish
 
 ## Known follow-ups (need your real browser, not just my CLI access)

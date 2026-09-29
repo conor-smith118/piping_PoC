@@ -9,3 +9,20 @@ resources:
       parent_path: /Workspace/Users/conor.smith@databricks.com/piping_poc_genie
       warehouse_id: ${var.warehouse_id}
       file_path: ../../src/genie/bm_l_001.geniespace.json
+      # CAN_RUN on the space object itself governs who the Genie
+      # Conversation API will accept OBO requests from (the app's genie()
+      # plugin forwards the asking user's own token). This is separate from
+      # the app-resource CAN_RUN grant in resources/app.burns_piping_poc.yml,
+      # which only registers the space as a bound app resource — without
+      # this block, only the bundle's deploying identity (conor.smith) could
+      # actually chat with the space; every other real Estimator/Lead
+      # Engineer/Design Lead/Admin user would get a 403.
+      permissions:
+        - group_name: Estimator
+          level: CAN_RUN
+        - group_name: Lead Engineer
+          level: CAN_RUN
+        - group_name: Design Lead
+          level: CAN_RUN
+        - group_name: piping_admin
+          level: CAN_RUN

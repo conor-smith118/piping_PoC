@@ -263,8 +263,10 @@ manifest` at build time.**
   role on (join `gold_project_rollup` + `live_user_project_role`); Admins see all.
 - **`/projects/:projectId`** — Main view: 6-stage timeline (from
   `gold_project_rollup`), role badge top-right (effective role, see Auth below),
-  "View as role" dropdown next to it (Admin-group members only), embedded dashboard
-  iframe fixed to this project, Kanban board (6 columns) of `gold_line_status` rows.
+  "View as role" dropdown next to it (Admin-group members only), a "Project
+  Insights" card tabbed between the embedded dashboard and a per-project Genie
+  chat (see "Genie chat integration in the app" below), Kanban board (6 columns)
+  of `gold_line_status` rows.
 - **`/projects/:projectId/lines/:lineId`** — Line detail slide-over: full line-list
   record, isometric/P&ID reference links, per-line stage-history timeline, true-up
   baseline-vs-actual side-by-side when applicable, and the one action button for
@@ -355,6 +357,47 @@ geniespace.json` and scaffold `resources/genie_spaces/<project_id>.genie-space.y
 — substituting the per-project view names — across the remaining four projects'
 resource files and `.geniespace.json`s. From then on, `databricks bundle deploy`
 creates/updates all 5 agents alongside everything else; no standalone script needed.
+
+## Genie chat integration in the app (per-project, not dashboard-native)
+
+The dashboard's native Genie link (`uiSettings.genieSpace.overrideId` in the
+`.lvdash.json`) bakes a single, static space ID into the dashboard *object*
+itself. That's fundamentally incompatible with this PoC's "one shared
+dashboard, parameterized per-embed by a `project_id` filter" decision (see
+"Dashboard" above) — a static ID can never track project selection. Rather
+than re-architecting the dashboard, the Genie chat surface lives in the app
+itself, additively:
+
+- **Server** (`server/server.ts`): AppKit's `genie()` plugin accepts a
+  `spaces` map of `alias -> Genie Space ID`. All 5 project spaces are
+  registered under a `GENIE_SPACES` constant keyed by **literal `project_id`**
+  (`"BM-L-001"` → its space ID, etc., read from per-project env vars that
+  `app.yaml` wires from the matching `genie_space` app resource in
+  `resources/app.burns_piping_poc.yml`). A `dashboards.genie` entry in
+  `user_api_scopes` is required for the plugin's OBO calls to the Genie
+  Conversation API (a real, requestable scope — unlike the automatic `iam.*`
+  defaults the rest of the app's auth model relies on).
+- **Client** (`components/GenieAssistant.tsx`, used from `ProjectView.tsx`'s
+  "Ask Genie" tab): renders `<GenieChat alias={project.projectId} />`. Since
+  the alias is exactly the current project's `project_id` — the same string
+  key the server's map uses — the chat automatically re-points to the correct
+  project's agent on every navigation, with no separate lookup table on
+  either side to drift out of sync. `key={project.projectId}` forces a full
+  remount on project switch so no conversation state carries over between
+  agents.
+- **Permissions**: each `resources/genie_spaces/*.genie-space.yml` grants
+  `CAN_RUN` to all 4 workspace groups (`Estimator`, `Lead Engineer`,
+  `Design Lead`, `piping_admin`) — this, not the app-resource binding, is what
+  lets a real end user (not just the bundle's deploying identity) actually
+  invoke the space via OBO.
+
+**Verified live** (Phase 8 build): direct calls to the deployed app's
+`/api/genie/BM-L-001/messages` and `/api/genie/BM-L-002/messages` with the
+same question ("How many lines are in this project in total?") returned two
+different, correct, project-scoped answers (22 vs. 19 lines), each hitting
+that project's own `spaceId` and `vw_genie_<project>_lines` view — confirming
+alias-to-project alignment works end-to-end through the app, not just
+directly against Genie as in the Phase 7 checkpoint.
 
 ## ML pipeline
 

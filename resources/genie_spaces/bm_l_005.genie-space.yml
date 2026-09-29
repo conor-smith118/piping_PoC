@@ -9,3 +9,14 @@ resources:
       parent_path: /Workspace/Users/conor.smith@databricks.com/piping_poc_genie
       warehouse_id: ${var.warehouse_id}
       file_path: ../../src/genie/bm_l_005.geniespace.json
+      # See bm_l_001.genie-space.yml for why this block is required (governs
+      # who the Conversation API accepts OBO requests from).
+      permissions:
+        - group_name: Estimator
+          level: CAN_RUN
+        - group_name: Lead Engineer
+          level: CAN_RUN
+        - group_name: Design Lead
+          level: CAN_RUN
+        - group_name: piping_admin
+          level: CAN_RUN

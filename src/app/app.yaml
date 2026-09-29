@@ -6,3 +6,19 @@ env:
   # AppKit "dashboard" resource type (see server/routes/config.ts).
   - name: DASHBOARD_ID
     value: '01f1bbad3b7713adbb0a7f2f2cb57900'
+  # AppKit's genie() plugin validates DATABRICKS_GENIE_SPACE_ID is set on
+  # startup even when a custom `spaces` map is passed in code (server.ts) —
+  # points at BM-L-001 as an arbitrary default/fallback, never actually used
+  # since every real call in this app passes an explicit per-project alias.
+  - name: DATABRICKS_GENIE_SPACE_ID
+    valueFrom: genie-bm-l-001
+  - name: DATABRICKS_GENIE_SPACE_BM_L_001
+    valueFrom: genie-bm-l-001
+  - name: DATABRICKS_GENIE_SPACE_BM_L_002
+    valueFrom: genie-bm-l-002
+  - name: DATABRICKS_GENIE_SPACE_BM_L_003
+    valueFrom: genie-bm-l-003
+  - name: DATABRICKS_GENIE_SPACE_BM_L_004
+    valueFrom: genie-bm-l-004
+  - name: DATABRICKS_GENIE_SPACE_BM_L_005
+    valueFrom: genie-bm-l-005
