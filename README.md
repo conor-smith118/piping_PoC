@@ -18,7 +18,7 @@ to run a live demo (simulate new data, observe it flow through, reset).
 | UC catalog.schema | `css_fevm.burns_piping_poc` |
 | Lakebase project | `burns-piping-poc` (branch `production`, database `databricks-postgres`) |
 | SQL Warehouse | `cssSQL` (`a4e59a1f13ab8b9a`) |
-| Workspace groups | `Estimator`, `Lead Engineer`, `Design Lead`, `piping_admin` (in-app role label: "Admin") |
+| Account-level groups | `Estimator Piping`, `Lead Engineer Piping`, `Design Lead Piping`, `Admin Piping` (in-app role labels stay "Estimator"/"Lead Engineer"/"Design Lead"/"Admin" — see `ARCHITECTURE.md`) |
 
 ## Deploying
 
@@ -141,6 +141,23 @@ this repo references.
       assign→list→revoke round-trip against the real API.
       **`docs/DEMO_SCRIPT.md`** rewritten from a placeholder into a concrete,
       timed walkthrough covering every phase.
+- [x] Phase 10 — migrated the 4 role groups from workspace-local to
+      **account-level** SCIM groups: `Estimator Piping`, `Lead Engineer Piping`,
+      `Design Lead Piping`, `Admin Piping` (the account already had unrelated
+      groups literally named `Estimator` etc., hence the suffix). Workspace-local
+      groups can't be selected/assumed at login, which is what actually
+      motivated this — see `ARCHITECTURE.md`'s "Workspace-local -> account-level
+      group migration" for the full story. Updated `server/lib/roles.ts`
+      (`GROUP_TO_ROLE`), `server/lib/auth.ts` (dev fallback), `server/routes/admin.ts`
+      (display mapping), and all 5 `resources/genie_spaces/*.genie-space.yml`
+      `permissions:` blocks — nowhere else needed to change, since the app's
+      SCIM group-lookup call is identical for account- and workspace-level
+      groups. **Verified live end-to-end after redeploying:** `/api/me` resolves
+      all 4 roles correctly from the new groups; the view-as switcher still
+      correctly 403s a wrong-role write on a real line
+      (`This action requires role Lead Engineer; you are Estimator...`); all 5
+      Genie spaces' permission grants redeployed cleanly and each space is
+      still reachable via the Conversation API.
 
 ## Known follow-ups (need your real browser, not just my CLI access)
 

@@ -31,7 +31,7 @@ against live workspace recon (not guessed from memory).
 | App name | `burns-piping-poc` |
 | DABs bundle name | `burns_piping_poc` |
 | GitHub repo | `conor-smith118/piping_PoC` (empty, ADMIN access, `gh` authenticated) |
-| Workspace groups | `Estimator`, `Lead Engineer`, `Design Lead`, `piping_admin` — **workspace-level SCIM groups** (`databricks groups create`), not account-level. See "Auth design" below for why this is sufficient. `Admin` is deliberately avoided as a *group* name (too generic/collision-prone — the workspace already has a generic `admins` group) — the group is called `piping_admin`, but the **in-app role label/value stays "Admin"** (matches the domain vocabulary from the workflow). Only the workspace object is renamed, not the role enum users see. |
+| Role groups | `Estimator Piping`, `Lead Engineer Piping`, `Design Lead Piping`, `Admin Piping` — **account-level** groups, migrated from an initial workspace-local design (see "Auth design" below, "Workspace-local -> account-level group migration"). The in-app role label/value stays "Estimator"/"Lead Engineer"/"Design Lead"/"Admin" regardless — only the underlying group objects are named differently. |
 
 **Key structural decision:** Lakebase holds **only live-project data**. The 20-30
 synthetic historical closed projects are generated directly into their own Delta
@@ -287,13 +287,13 @@ manifest` at build time.**
 `getEffectiveRole(user, projectId, session)` — one function, used for both UI gating
 and every write-route's server-side check:
 
-1. Fetch the user's real group memberships via the OBO-authenticated SDK client's
-   **`w.current_user.me()`** call and its `.groups[].display` field — this is
-   already confirmed to return group membership on this exact API in this workspace
-   (verified during recon: `databricks current-user me` returns a `groups` array).
-   This sidesteps any dependency on account-level identity federation or
-   `is_account_group_member()` SQL, so plain **workspace-level** SCIM groups
-   (`databricks groups create`) are sufficient — no account-admin profile needed.
+1. Fetch the user's real group memberships via the OBO-authenticated call to the
+   workspace's SCIM **`/api/2.0/preview/scim/v2/Me`** endpoint (`server/lib/auth.ts`)
+   and its `.groups[].display` field. This endpoint returns a user's full group
+   membership regardless of whether a group is workspace-local or account-level —
+   confirmed by direct testing across both (see "Workspace-local -> account-level
+   group migration" below) — so `getEffectiveRole` itself needed zero changes when
+   the groups migrated; only `GROUP_TO_ROLE`'s literal name strings did.
 2. Look up `live_user_project_role` for `(user, projectId)` → the assigned role,
    but only honor it if that role is also in the group-membership list from step 1
    (defensive re-check — revoking group membership immediately invalidates a stale
@@ -314,11 +314,53 @@ since step 2 won't honor it. `/admin` records *intent*; the real enforcement
 is entirely in `getEffectiveRole`, which is deliberately the *only* place this
 logic lives.
 
+### Workspace-local -> account-level group migration
+
+Originally built with plain **workspace-level** SCIM groups (`databricks groups
+create`) named exactly `Estimator`/`Lead Engineer`/`Design Lead`/`piping_admin` —
+sufficient for `getEffectiveRole`'s own logic (see step 1 above), and avoided
+needing an account-admin profile at all during initial build.
+
+That turned out to be the wrong call for how this PoC actually gets tested day to
+day: workspace-local groups can't be selected/assumed at login — a real tester
+logging in as themselves always gets *their own* identity, with no way to pick
+"log in as Estimator" the way account-level groups support (e.g. via SSO
+role/group selection). The whole point of a role-based demo is trying each role
+as if you were really that person, so this was a real, not cosmetic, gap.
+
+Migration (done live, workspace stayed up throughout — no code changes were
+needed in `getEffectiveRole` itself, only in the places that hardcode group
+*names*):
+1. Confirmed which of two candidate account profiles actually owns this
+   workspace (`f9ba5888-fdb9-4e53-9e5f-724c437d1779` — cross-checked against
+   `account_id` already recorded in 5 other existing CLI profiles for this same
+   workspace, then confirmed via `databricks account workspaces list` returning
+   this workspace as one of only 5 in that account).
+2. Account-level group creation requires the **Account Admin** role on that
+   specific account (distinct from being merely authenticated to it) — the
+   deploying identity didn't have it; a workspace admin granted it, then created
+   the 4 groups by hand via the Account Console. They couldn't reuse the exact
+   old names — this account already had unrelated groups named `Estimator` etc.
+   from other workloads — so all 4 got a ` Piping` suffix:
+   `Estimator Piping` / `Lead Engineer Piping` / `Design Lead Piping` /
+   `Admin Piping`.
+3. **Verified the linchpin fact before deleting anything**: called
+   `databricks current-user me --profile fevm-css-demo` (the same workspace-level
+   SCIM identity the app itself queries) and confirmed the new account groups
+   appeared in `.groups[].display` identically to how the old workspace groups
+   had — meaning `auth.ts`'s `fetchGroupsFromScim` needed no changes at all, only
+   `GROUP_TO_ROLE`'s keys (`roles.ts`), the dev fallback (`auth.ts`), the display
+   mapping in `/admin` (`admin.ts`), and each Genie space's `permissions:` block
+   (`resources/genie_spaces/*.genie-space.yml`) — all keyed by literal group-name
+   strings, none by ID.
+4. Old workspace-local groups deleted by the workspace admin once (3) confirmed
+   the new ones work.
+
 **"View as role" design — bounded, not a superuser bypass:** visible only to
-`piping_admin`-group members (displayed in-app as the "Admin" role); the dropdown
+`Admin Piping`-group members (displayed in-app as the "Admin" role); the dropdown
 only offers roles the tester is *actually* a group-member of.
-`conor.smith@databricks.com` is added to all 4 groups (`Estimator`, `Lead Engineer`,
-`Design Lead`, `piping_admin`), so this gives full testing coverage without a
+`conor.smith@databricks.com` is added to all 4 groups (`Estimator Piping`,
+`Lead Engineer Piping`, `Design Lead Piping`, `Admin Piping`), so this gives full testing coverage without a
 separate unbounded-bypass code path that would let a demo show behavior no real
 account setup could reproduce.
 

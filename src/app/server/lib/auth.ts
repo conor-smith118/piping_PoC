@@ -29,7 +29,7 @@ export interface RequestIdentity {
 // conor.smith's real membership (all 4 groups) so local testing can exercise
 // every role via the same "view as" switcher used in the deployed app.
 const DEV_FALLBACK_EMAIL = 'conor.smith@databricks.com';
-const DEV_FALLBACK_GROUPS = ['Estimator', 'Lead Engineer', 'Design Lead', 'piping_admin'];
+const DEV_FALLBACK_GROUPS = ['Estimator Piping', 'Lead Engineer Piping', 'Design Lead Piping', 'Admin Piping'];
 
 const groupsCache = new Map<string, { groups: string[]; expiresAt: number }>();
 const CACHE_TTL_MS = 5 * 60 * 1000;

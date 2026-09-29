@@ -13,9 +13,13 @@ baseline)
   demo starts from the exact same known-good baseline every time — 93 lines,
   spread across all 6 stages, 83 ML predictions already scored.
 - Confirm you're logged into the app as `conor.smith@databricks.com` — a
-  member of all 4 workspace groups (`Estimator`, `Lead Engineer`,
-  `Design Lead`, `piping_admin`), so the "view as" switcher can act as any
-  role without needing 4 separate real accounts.
+  member of all 4 account-level groups (`Estimator Piping`,
+  `Lead Engineer Piping`, `Design Lead Piping`, `Admin Piping`), so the "view
+  as" switcher can act as any role without needing 4 separate real accounts.
+  These are account-level (not workspace-local) specifically so a real user
+  who only holds one role can instead log in by selecting/assuming that
+  group directly, rather than needing the in-app switcher at all — either
+  path exercises the exact same server-side authorization check.
 
 ## 1. The workflow, as each role sees it (~5 min)
 
@@ -87,7 +91,7 @@ the ETA feel real, explicitly caveated as trained on synthetic data if asked.
 
 ## 5. Admin (~1 min)
 
-Open **Admin** (nav bar, visible because you're a `piping_admin` group
+Open **Admin** (nav bar, visible because you're an `Admin Piping` group
 member) — shows every current per-project role assignment across all 5
 projects, and lets you assign/revoke one live. Mention the reconciliation
 rule: an assignment here only takes effect if the target user is *also* a

@@ -12,11 +12,11 @@ resources:
       # See bm_l_001.genie-space.yml for why this block is required (governs
       # who the Conversation API accepts OBO requests from).
       permissions:
-        - group_name: Estimator
+        - group_name: Estimator Piping
           level: CAN_RUN
-        - group_name: Lead Engineer
+        - group_name: Lead Engineer Piping
           level: CAN_RUN
-        - group_name: Design Lead
+        - group_name: Design Lead Piping
           level: CAN_RUN
-        - group_name: piping_admin
+        - group_name: Admin Piping
           level: CAN_RUN

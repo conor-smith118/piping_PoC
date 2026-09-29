@@ -10,10 +10,10 @@ import { eligibleRoles, ROLES } from '../lib/roles';
 // POST /api/admin/roles below for why this route doesn't (and doesn't need
 // to) independently re-verify that membership before writing the row.
 const ROLE_TO_GROUP: Record<string, string> = {
-  Estimator: 'Estimator',
-  'Lead Engineer': 'Lead Engineer',
-  'Design Lead': 'Design Lead',
-  Admin: 'piping_admin',
+  Estimator: 'Estimator Piping',
+  'Lead Engineer': 'Lead Engineer Piping',
+  'Design Lead': 'Design Lead Piping',
+  Admin: 'Admin Piping',
 };
 
 const AssignBody = z.object({

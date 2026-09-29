@@ -121,9 +121,10 @@ for i in range(1, N_PROJECTS + 1):
     )
 
     # role assignments: conor.smith as Admin (sees/administers everything via
-    # the piping_admin group anyway, but an explicit row keeps the table
-    # coherent), plus one synthetic Estimator / Lead Engineer / Design Lead
-    # per project so the audit trail has believable, distinct actors.
+    # the "Admin Piping" account-level group anyway, but an explicit row
+    # keeps the table coherent), plus one synthetic Estimator / Lead Engineer
+    # / Design Lead per project so the audit trail has believable, distinct
+    # actors.
     roles_out.append(
         f"INSERT INTO user_project_role (user_email, project_id, role, assigned_by) VALUES "
         f"({sql_str('conor.smith@databricks.com')}, {sql_str(project_id)}, 'Admin', 'system');"

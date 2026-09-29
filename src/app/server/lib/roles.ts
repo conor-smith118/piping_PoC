@@ -8,16 +8,24 @@ import type { AppKitHandle } from './appkitTypes';
 export const ROLES = ['Estimator', 'Lead Engineer', 'Design Lead', 'Admin'] as const;
 export type Role = (typeof ROLES)[number];
 
-// Workspace *group* names differ from the in-app *role* label for Admin —
-// `piping_admin` was chosen deliberately to avoid colliding with the
-// workspace's generic `admins` group; the role a user sees/holds is still
-// called "Admin". Estimator/Lead Engineer/Design Lead group names match their
-// role name exactly.
+// Workspace *group* names differ from the in-app *role* label — originally
+// just for Admin (`piping_admin`, to avoid colliding with the workspace's
+// generic `admins` group), but now for all 4: these groups were migrated
+// from workspace-local SCIM groups to **account-level** groups (so a user
+// can select/assume one at login, which workspace-local groups don't
+// support), and the account already had unrelated groups named exactly
+// `Estimator` etc. from other workloads sharing this account — so all 4 got
+// a ` Piping` suffix on creation. The role a user sees/holds in the app is
+// unaffected either way — still "Estimator"/"Lead Engineer"/"Design
+// Lead"/"Admin". Confirmed the workspace's SCIM `Me` call (see auth.ts)
+// surfaces account-group membership identically to how it surfaced
+// workspace-group membership — no other code needed to change for this
+// migration, only this mapping's keys.
 const GROUP_TO_ROLE: Record<string, Role> = {
-  Estimator: 'Estimator',
-  'Lead Engineer': 'Lead Engineer',
-  'Design Lead': 'Design Lead',
-  piping_admin: 'Admin',
+  'Estimator Piping': 'Estimator',
+  'Lead Engineer Piping': 'Lead Engineer',
+  'Design Lead Piping': 'Design Lead',
+  'Admin Piping': 'Admin',
 };
 
 export function eligibleRoles(groups: string[]): Role[] {

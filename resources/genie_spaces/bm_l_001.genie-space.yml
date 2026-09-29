@@ -10,19 +10,22 @@ resources:
       warehouse_id: ${var.warehouse_id}
       file_path: ../../src/genie/bm_l_001.geniespace.json
       # CAN_RUN on the space object itself governs who the Genie
-      # Conversation API will accept OBO requests from (the app's genie()
-      # plugin forwards the asking user's own token). This is separate from
-      # the app-resource CAN_RUN grant in resources/app.burns_piping_poc.yml,
-      # which only registers the space as a bound app resource — without
-      # this block, only the bundle's deploying identity (conor.smith) could
-      # actually chat with the space; every other real Estimator/Lead
-      # Engineer/Design Lead/Admin user would get a 403.
+      # Conversation API accepts requests from when a real user clicks this
+      # project's dashboard's own built-in "Ask Genie" button (see
+      # docs/ARCHITECTURE.md's "Dashboards + native Genie" section — Phase
+      # 8b moved Genie access from an app-level plugin to purely this native,
+      # per-dashboard mechanism). Without this block, only the bundle's
+      # deploying identity (conor.smith) could actually chat with the space;
+      # every other real Estimator/Lead Engineer/Design Lead/Admin user would
+      # get a 403. Group names are account-level groups (migrated from
+      # workspace-local — see roles.ts) with a " Piping" suffix, not the
+      # in-app role labels themselves.
       permissions:
-        - group_name: Estimator
+        - group_name: Estimator Piping
           level: CAN_RUN
-        - group_name: Lead Engineer
+        - group_name: Lead Engineer Piping
           level: CAN_RUN
-        - group_name: Design Lead
+        - group_name: Design Lead Piping
           level: CAN_RUN
-        - group_name: piping_admin
+        - group_name: Admin Piping
           level: CAN_RUN
