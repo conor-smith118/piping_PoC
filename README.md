@@ -160,32 +160,36 @@ this repo references.
       still reachable via the Conversation API.
 - [x] Phase 11 — landing-page identity indicator (`ProjectPicker.tsx` now
       shows signed-in email + eligible-role badges — was previously only
-      visible once inside a project) + investigated whether Databricks'
-      native "assume role" RBAC feature could substitute for separate
-      per-role test accounts. Conclusively does not: 4 independent
-      mechanisms tried and disproven (workspace UI switcher, `aid=` URL
-      param on both the app's and workspace's URL, `aid=` against the raw
-      SCIM API directly, `assume_group` OAuth param) — full writeup in
-      `ARCHITECTURE.md`'s "Why Databricks 'assume role' doesn't change what
-      the app sees". Root cause: the SCIM `/Me` API this app's identity
-      model is built on is a pure directory lookup with no session/token
-      "assumed role" concept at all. Also found + fixed a real bug along
-      the way: that API's `groups` array order is unstable across calls
-      (confirmed directly), which was making the landing page's role badges
-      visibly reorder on every load — fixed by sorting `eligibleRoles()`
-      into the fixed `ROLES` order.
+      visible once inside a project), plus a full investigation into
+      Databricks' native "assume role" RBAC feature. 4 mechanisms tried and
+      disproven (workspace UI switcher, `aid=` URL param on both the app's
+      and workspace's URL, `aid=` against the raw SCIM API directly,
+      `assume_group` OAuth param) before finding the one that actually
+      works: a genuinely **fresh** OAuth login (e.g. incognito window) with
+      a role picked during it embeds an `ag` (assumed group) claim in the
+      forwarded token's JWT — confirmed directly (`"ag":"153366456771408"`
+      after picking Estimator, matching that group's real ID exactly). Wired
+      into `server/lib/auth.ts`/`roles.ts`: when present, narrows the
+      request's identity to just that one role, bypassing the full-membership
+      SCIM lookup entirely. Full trail in `ARCHITECTURE.md`'s "Databricks
+      'assume role' — found the real mechanism". This means
+      `conor.smith@databricks.com` can now test any restricted single-role
+      view directly (incognito + pick a role at login) — no separate test
+      accounts needed after all. Also found + fixed a real bug along the
+      way: the SCIM `/Me` API's `groups` array order is unstable across
+      calls (confirmed directly), which was making the landing page's role
+      badges visibly reorder on every load — fixed by sorting
+      `eligibleRoles()` into the fixed `ROLES` order.
 
 ## Known follow-ups (need your real browser, not just my CLI access)
 
-0. **Separate per-role test users, still pending.** The only remaining way
-   to see a genuinely restricted single-role view (confirmed by the
-   investigation above — Databricks' native role-assumption doesn't reach
-   this app) is a real user who is a member of *only* one non-admin group.
-   Needs Account Admin on `f9ba5888-fdb9-4e53-9e5f-724c437d1779` (same as
-   the group migration) to create 3 users, each in exactly one of
-   `Estimator Piping` / `Lead Engineer Piping` / `Design Lead Piping` (not
-   `Admin Piping`) — native-password vs. SSO-backed identity is your call,
-   depending on how this account's auth is configured.
+0. **Confirm the `ag`-claim fix in your own browser.** Open the app in an
+   incognito window, pick a non-Admin role (e.g. Estimator) at the login
+   prompt, and check the landing page shows just that one role and only its
+   assigned projects. I verified the decode/lookup logic in isolation and
+   confirmed the claim's real shape from your test, but haven't seen the
+   full path (real incognito login → this exact deployed code → landing
+   page) run start to finish myself.
 
 1. **Embedding domain allowlist.** If a dashboard iframe renders
    blank/blocked instead of the dashboard, a workspace admin needs to allow

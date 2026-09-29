@@ -16,7 +16,16 @@
 // docs don't document one, and the raw REST shape here is already confirmed
 // against this exact workspace (`databricks current-user me` returns a
 // `groups` array with `.display` names matching our 4 role groups).
+//
+// Databricks RBAC "assume role" support: the forwarded token itself is a
+// JWT, and when the caller went through a fresh OAuth authorization flow
+// and explicitly picked a role, its decoded payload carries an `ag`
+// ("assumed group") claim with that role's backing group ID — found by
+// direct empirical testing, documented in ARCHITECTURE.md. When present, it
+// takes priority over the full SCIM group list, narrowing this request's
+// identity to just that one assumed role.
 import type { Request } from 'express';
+import { GROUP_ID_TO_NAME } from './roles';
 
 export interface RequestIdentity {
   email: string;
@@ -33,6 +42,25 @@ const DEV_FALLBACK_GROUPS = ['Estimator Piping', 'Lead Engineer Piping', 'Design
 
 const groupsCache = new Map<string, { groups: string[]; expiresAt: number }>();
 const CACHE_TTL_MS = 5 * 60 * 1000;
+
+/** Decodes a JWT's payload segment without verifying its signature — safe
+ * here because we never trust the *content* on its own; the token is only
+ * ever used as the actual OBO bearer credential for the SCIM call below (or,
+ * when `ag` is present, we trust it precisely because Databricks itself
+ * already only ever issues that claim after checking Assume permission —
+ * the same trust boundary as everything else forwarded by the platform's
+ * own reverse proxy). */
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return null;
+    const base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
+    return JSON.parse(Buffer.from(padded, 'base64').toString('utf-8')) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
 
 async function fetchGroupsFromScim(accessToken: string): Promise<string[]> {
   const rawHost = process.env.DATABRICKS_HOST;
@@ -68,6 +96,16 @@ export async function getRequestIdentity(req: Request): Promise<RequestIdentity>
 
   if (!email || !accessToken) {
     return { email: DEV_FALLBACK_EMAIL, groups: DEV_FALLBACK_GROUPS, isDevFallback: true };
+  }
+
+  const assumedGroupId = decodeJwtPayload(accessToken)?.ag;
+  const assumedGroupName = typeof assumedGroupId === 'string' ? GROUP_ID_TO_NAME[assumedGroupId] : undefined;
+  if (assumedGroupName) {
+    // No SCIM call needed (or wanted) here — narrowing to exactly the
+    // assumed role is the whole point, and a fresh role-selection login
+    // always mints a distinct token anyway, so there's no cross-request
+    // caching benefit to reusing the SCIM fetch path for this case.
+    return { email, groups: [assumedGroupName], isDevFallback: false };
   }
 
   const cached = groupsCache.get(accessToken);

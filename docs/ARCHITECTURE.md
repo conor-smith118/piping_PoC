@@ -356,52 +356,65 @@ needed in `getEffectiveRole` itself, only in the places that hardcode group
 4. Old workspace-local groups deleted by the workspace admin once (3) confirmed
    the new ones work.
 
-### Why Databricks "assume role" doesn't change what the app sees
+### Databricks "assume role" — found the real mechanism (`ag` token claim)
 
 Account-level groups unlocked Databricks' real, documented RBAC "assume role"
-feature (https://docs.databricks.com/aws/en/security/auth/rbac/switch-roles) —
-worth testing directly, since on paper it looks like exactly what's needed to
-log in as a single restricted role without separate accounts. **It doesn't
-reach this app, confirmed empirically, not by assumption** — every mechanism
-the docs describe was tried and directly disproven:
+feature (https://docs.databricks.com/aws/en/security/auth/rbac/switch-roles).
+Getting to the actual working mechanism took ruling out several plausible but
+wrong ones first — worth recording all of them, since the wrong ones looked
+just as promising on paper:
 
 1. **Workspace UI role switcher** (top-right → hover workspace → pick a role):
-   switched in-session, then opened the app in the same session — app still
-   showed the real identity's full group list.
+   switched in-session, then opened the app in the same browser session —
+   app still showed the real identity's full group list.
 2. **`aid=<group-id>` URL parameter** (documented to persist across
    navigation, unlike #1): tried directly on the app's own URL — no effect.
    Tried on the *workspace* URL first — this one genuinely worked at the
    workspace level (confirmed: entered the workspace under the assumed
    Estimator role) — but navigating into the app from there still showed the
-   full identity, not the assumed role.
-3. **Directly against the raw SCIM `/Me` API** the app actually calls
-   (`server/lib/auth.ts`) — added `?aid=<group-id>` straight onto the API
-   call itself. Zero effect on the response content.
-4. **`assume_group` OAuth parameter** (docs: "manually generate a
-   role-scoped OAuth token by passing the underlying group ID as the
-   `assume_group` parameter during the OAuth authorization code flow") —
-   attempted via `databricks auth login --host "...&assume_group=<id>"`;
-   decoded the resulting JWT's claims directly — no role/assumed-identity
-   claim anywhere (`sub` is just the real email, `scope` is generic
-   `all-apis offline_access`).
+   full identity.
+3. **Directly against the raw SCIM `/Me` API** the app actually calls — added
+   `?aid=<group-id>` straight onto the API call itself. Zero effect.
+4. **`assume_group` OAuth parameter** via `databricks auth login`: decoded
+   the resulting JWT — no role claim anywhere.
 
-**Root cause:** SCIM `/Me` is a pure identity-*directory* lookup — it always
-returns a user's full, real, permanent group membership. It has no concept of
-"which role is currently assumed for this session/token" at all, so no
-mechanism that only affects session/token *scope* can ever change its output.
-Whatever the RBAC docs mean by "an app can authorize... as a role that user
-has permission to assume" almost certainly refers to a different subsystem —
-most plausibly Unity Catalog data-governance checks evaluated against the
-forwarded token's scope directly (e.g. row-level security via
-`is_account_group_member()`), not the SCIM directory API this app's identity
-model is built on.
+**All four failed for the same reason**: none of them forced a *new* OAuth
+token exchange — they all reused an already-cached session/token (confirmed
+directly: hitting the app with and without `?aid=` produced byte-for-byte
+the same token, same `jti`). SCIM `/Me` is also a pure identity-*directory*
+lookup regardless — it always returns full group membership no matter what
+token calls it, so even a role-scoped token wouldn't change *that specific
+API's* answer.
 
-**Practical consequence:** the only way to see a genuinely restricted,
-single-role view of this app is a real user who is a member of *only* that
-one group — not `conor.smith@databricks.com` assuming a role, since
-`conor.smith` is a permanent member of all 4 groups regardless of any
-in-session role assumption. See README's "Known follow-ups" for the pending
-separate-test-user request this implies.
+**What actually works:** forcing a genuinely fresh authorization-code
+exchange — opening the app in an incognito window (or otherwise starting
+with no cached session) triggers a real login prompt that lets the user pick
+a role. The resulting `x-forwarded-access-token`'s decoded JWT payload then
+carries an `ag` ("assumed group") claim with that role's backing group ID —
+confirmed directly: selecting Estimator produced `"ag":"153366456771408"`,
+exactly Estimator Piping's group ID. This is a claim on the token itself, not
+something any directory-lookup API would surface — which is exactly why
+mechanisms 1-4 above, all of which only affected session/URL/API-call state
+rather than forcing a fresh token, never showed anything.
+
+**Wired into the app** (`server/lib/auth.ts`, `server/lib/roles.ts`):
+`getRequestIdentity` decodes the forwarded token's JWT payload (no signature
+verification needed — the token is already the trusted OBO bearer credential
+issued by Databricks' own reverse proxy; decoding it locally is just reading
+a claim already implicitly trusted). If `ag` is present and matches one of
+the 4 known group IDs (`GROUP_ID_TO_NAME`, kept as a separate ID-keyed map
+alongside the display-name-keyed `GROUP_TO_ROLE` — same 4 groups, different
+keyspace), the request's `groups` is narrowed to exactly that one group,
+bypassing the SCIM call entirely — no reconciliation against real membership
+needed, since Databricks itself only ever issues `ag` after checking Assume
+permission. Absent (normal login, no role picked), behavior is unchanged —
+full SCIM group list, exactly as before.
+
+**Practical consequence:** `conor.smith@databricks.com` — a permanent member
+of all 4 groups — can now genuinely test each restricted role without any
+separate test accounts: open the app in an incognito window and pick a role
+at the login prompt. The separate-test-user idea floated earlier turned out
+to be unnecessary.
 
 **Incidental bug found and fixed along the way:** the SCIM `/Me` API's
 `groups` array order is unstable — confirmed directly (two identical calls,
