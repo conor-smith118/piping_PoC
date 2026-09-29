@@ -356,6 +356,61 @@ needed in `getEffectiveRole` itself, only in the places that hardcode group
 4. Old workspace-local groups deleted by the workspace admin once (3) confirmed
    the new ones work.
 
+### Why Databricks "assume role" doesn't change what the app sees
+
+Account-level groups unlocked Databricks' real, documented RBAC "assume role"
+feature (https://docs.databricks.com/aws/en/security/auth/rbac/switch-roles) —
+worth testing directly, since on paper it looks like exactly what's needed to
+log in as a single restricted role without separate accounts. **It doesn't
+reach this app, confirmed empirically, not by assumption** — every mechanism
+the docs describe was tried and directly disproven:
+
+1. **Workspace UI role switcher** (top-right → hover workspace → pick a role):
+   switched in-session, then opened the app in the same session — app still
+   showed the real identity's full group list.
+2. **`aid=<group-id>` URL parameter** (documented to persist across
+   navigation, unlike #1): tried directly on the app's own URL — no effect.
+   Tried on the *workspace* URL first — this one genuinely worked at the
+   workspace level (confirmed: entered the workspace under the assumed
+   Estimator role) — but navigating into the app from there still showed the
+   full identity, not the assumed role.
+3. **Directly against the raw SCIM `/Me` API** the app actually calls
+   (`server/lib/auth.ts`) — added `?aid=<group-id>` straight onto the API
+   call itself. Zero effect on the response content.
+4. **`assume_group` OAuth parameter** (docs: "manually generate a
+   role-scoped OAuth token by passing the underlying group ID as the
+   `assume_group` parameter during the OAuth authorization code flow") —
+   attempted via `databricks auth login --host "...&assume_group=<id>"`;
+   decoded the resulting JWT's claims directly — no role/assumed-identity
+   claim anywhere (`sub` is just the real email, `scope` is generic
+   `all-apis offline_access`).
+
+**Root cause:** SCIM `/Me` is a pure identity-*directory* lookup — it always
+returns a user's full, real, permanent group membership. It has no concept of
+"which role is currently assumed for this session/token" at all, so no
+mechanism that only affects session/token *scope* can ever change its output.
+Whatever the RBAC docs mean by "an app can authorize... as a role that user
+has permission to assume" almost certainly refers to a different subsystem —
+most plausibly Unity Catalog data-governance checks evaluated against the
+forwarded token's scope directly (e.g. row-level security via
+`is_account_group_member()`), not the SCIM directory API this app's identity
+model is built on.
+
+**Practical consequence:** the only way to see a genuinely restricted,
+single-role view of this app is a real user who is a member of *only* that
+one group — not `conor.smith@databricks.com` assuming a role, since
+`conor.smith` is a permanent member of all 4 groups regardless of any
+in-session role assumption. See README's "Known follow-ups" for the pending
+separate-test-user request this implies.
+
+**Incidental bug found and fixed along the way:** the SCIM `/Me` API's
+`groups` array order is unstable — confirmed directly (two identical calls,
+same token, no parameters changed, two different orderings). Un-sorted, this
+made the landing page's role badges visibly reorder on every load. Fixed in
+`eligibleRoles()` (`roles.ts`) by filtering the fixed `ROLES` array against
+group membership, rather than building the result in whatever order the API
+happened to return.
+
 **"View as role" design — bounded, not a superuser bypass:** visible only to
 `Admin Piping`-group members (displayed in-app as the "Admin" role); the dropdown
 only offers roles the tester is *actually* a group-member of.

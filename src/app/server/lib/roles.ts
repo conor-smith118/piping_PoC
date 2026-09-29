@@ -34,7 +34,12 @@ export function eligibleRoles(groups: string[]): Role[] {
     const role = GROUP_TO_ROLE[g];
     if (role) set.add(role);
   }
-  return Array.from(set);
+  // The SCIM `Me` endpoint's `groups` array order is not stable — confirmed
+  // directly (two identical calls, same token, no params changed, returned
+  // groups in two different orders). Left unsorted, this made the landing
+  // page's role badges visibly reorder/reflow on every load. Sort into the
+  // fixed ROLES order so the UI is deterministic regardless of API ordering.
+  return ROLES.filter((r) => set.has(r));
 }
 
 /** Stage number (1-6) -> the role that performs that stage's action. */
