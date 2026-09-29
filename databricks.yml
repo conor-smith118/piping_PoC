@@ -4,6 +4,7 @@ bundle:
 include:
   - resources/*.yml
   - resources/genie_spaces/*.yml
+  - resources/dashboards/*.yml
 
 variables:
   catalog:

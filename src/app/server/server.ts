@@ -1,4 +1,4 @@
-import { createApp, genie, lakebase, server } from '@databricks/appkit';
+import { createApp, lakebase, server } from '@databricks/appkit';
 import { registerMeRoutes } from './routes/me';
 import { registerViewAsRoutes } from './routes/viewAs';
 import { registerProjectRoutes } from './routes/projects';
@@ -6,33 +6,14 @@ import { registerLineRoutes } from './routes/lines';
 import { registerConfigRoutes } from './routes/config';
 import type { AppKitHandle } from './lib/appkitTypes';
 
-// One Genie space alias per live project (Phase 7's 5 per-project agents —
-// see resources/genie_spaces/*.genie-space.yml). Keying the map by the
-// literal project_id (e.g. "BM-L-001") rather than an arbitrary short name
-// means the client can pass `alias={project.projectId}` directly — no
-// lookup table needed on either side, and no way for the two to drift out
-// of sync. This is the answer to "can the embedded Genie agent track
-// project selection": yes, via AppKit's multi-space `spaces` map, not via
-// the dashboard's native (single, static) Genie link — see
-// components/GenieAssistant.tsx and docs/ARCHITECTURE.md.
-function requireEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(
-      `${name} is not set — check app.yaml's env block and the matching genie_space app resource ` +
-        'in resources/app.burns_piping_poc.yml.',
-    );
-  }
-  return value;
-}
-
-const GENIE_SPACES: Record<string, string> = {
-  'BM-L-001': requireEnv('DATABRICKS_GENIE_SPACE_BM_L_001'),
-  'BM-L-002': requireEnv('DATABRICKS_GENIE_SPACE_BM_L_002'),
-  'BM-L-003': requireEnv('DATABRICKS_GENIE_SPACE_BM_L_003'),
-  'BM-L-004': requireEnv('DATABRICKS_GENIE_SPACE_BM_L_004'),
-  'BM-L-005': requireEnv('DATABRICKS_GENIE_SPACE_BM_L_005'),
-};
+// Note: an earlier version of this file registered AppKit's genie() plugin
+// with a per-project `spaces` map, backing an in-app "Ask Genie" chat tab.
+// Reverted: it created a confusing second Genie entry point alongside each
+// dashboard's own built-in "Ask Genie" button. Per-project Genie access now
+// goes entirely through each project's own dashboard (see
+// resources/dashboards/*.dashboard.yml and
+// src/dashboards/build_dashboard_config.py), natively linked via
+// `uiSettings.genieSpace.overrideId` — no app-level plugin/OBO scope needed.
 
 // Defense in depth: every route handler in routes/*.ts has its own
 // try/catch, but Node's default behavior for ANY unhandled promise
@@ -72,7 +53,7 @@ async function verifyLakebaseAccess(appkit: AppKitHandle) {
 }
 
 createApp({
-  plugins: [server(), lakebase(), genie({ spaces: GENIE_SPACES })],
+  plugins: [server(), lakebase()],
   async onPluginsReady(appkit) {
     await verifyLakebaseAccess(appkit);
     registerMeRoutes(appkit);

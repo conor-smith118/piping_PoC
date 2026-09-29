@@ -1,9 +1,9 @@
 resources:
   dashboards:
-    project_progress:
-      display_name: "Piping Project Progress"
+    dash_bm_l_001:
+      display_name: "Piping Project Progress — BM-L-001"
       parent_path: /Workspace/Users/conor.smith@databricks.com/piping_poc_dashboards
-      file_path: ../src/dashboards/project_progress.lvdash.json
+      file_path: ../../src/dashboards/project_progress_bm_l_001.lvdash.json
       warehouse_id: ${var.warehouse_id}
       dataset_catalog: ${var.catalog}
       dataset_schema: ${var.schema}
@@ -14,3 +14,9 @@ resources:
       # embedded app reads the PUBLISHED version, so that manual publish
       # step (documented in ARCHITECTURE.md) is still required after every
       # deploy that changes this file, even with embed_credentials set here.
+      #
+      # One dashboard PER project (not the single shared, filtered dashboard
+      # from Phase 5) so each can be natively linked via the JSON's
+      # `uiSettings.genieSpace.overrideId` to that project's own curated
+      # Genie agent — see src/dashboards/build_dashboard_config.py and
+      # docs/ARCHITECTURE.md's "Dashboards + native Genie" section.

@@ -60,15 +60,11 @@ this repo references.
       rebuilds `gold_line_status` / `gold_project_rollup`. Verified live: the
       Phase 2-3 checkpoint's test write is correctly reflected in
       `gold_line_status` after running the job.
-- [x] Phase 5 — dashboard. "Piping Project Progress"
-      (`src/dashboards/project_progress.lvdash.json`) — KPIs, stage
-      breakdown bar chart, completion pie, line-detail table, single
-      `project_id` filter — published with `embed_credentials=true` and
-      embedded in `/projects/:projectId` via `DashboardEmbed.tsx`. **Two
-      things need your confirmation in a real browser** (see "Known
-      follow-ups" below): the exact filter query-parameter encoding, and
-      whether this app's domain needs a workspace-admin embedding-allowlist
-      addition.
+- [x] Phase 5 — dashboard (superseded by Phase 8b below — see that entry
+      for the current design). Originally one shared, `project_id`-filtered
+      dashboard; this turned out to be incompatible with natively linking a
+      per-project Genie agent (Lakeview's Genie link is one static ID baked
+      into the dashboard object).
 - [x] Phase 6 — ML model. `ml_train_stage_duration` (Lakeflow Job): builds
       `ml_stage_transition_features` from historical closed projects (~5,300
       rows), trains an XGBoost regressor on `log(duration_hours)` via 20
@@ -98,39 +94,47 @@ this repo references.
       `resources/genie_spaces/*.genie-space.yml` + `src/genie/*.geniespace.json`
       — `bundle deploy` creates/updates all 5. Verified live: asked each
       agent a real question, got correct answers with clean generated SQL.
-- [x] Phase 8a — per-project Genie chat in the app. The dashboard has no
-      native Genie link (a static, one-per-dashboard mechanism incompatible
-      with the shared/parameterized dashboard from Phase 5) — instead, added
-      AppKit's `genie()` plugin with a `spaces` map keyed by literal
-      `project_id`, plus a `GenieChat` panel (`components/GenieAssistant.tsx`)
-      on a new "Ask Genie" tab in `ProjectView.tsx`'s Project Insights card.
-      Required a `dashboards.genie` OBO scope and per-space `CAN_RUN`
-      permissions for all 4 workspace groups on each
-      `resources/genie_spaces/*.genie-space.yml`. Verified live: the same
-      question sent to the app's `BM-L-001` and `BM-L-002` aliases correctly
-      returned two different, project-scoped answers (22 vs. 19 lines,
-      correct `spaceId`/view for each) — see `docs/ARCHITECTURE.md`'s "Genie
-      chat integration in the app" section.
-- [ ] Phase 8b — simulate/reset jobs
-- [ ] Phase 9 — polish
+- [x] Phase 8a — per-project Genie chat in the app (**built, then
+      reverted**). Added AppKit's `genie()` plugin with a `spaces` map keyed
+      by `project_id`, plus a `GenieChat` panel on a new "Ask Genie" tab.
+      Verified live and worked correctly — but once live, it sat alongside
+      each dashboard's own default "Ask Genie" button, which felt like two
+      competing Genie entry points. Superseded by Phase 8b.
+- [x] Phase 8b — one dashboard per project, natively linked to that
+      project's Genie agent (Option B — replaces both Phase 5's shared
+      dashboard and Phase 8a's in-app chat tab). 5 dashboards
+      (`src/dashboards/project_progress_bm_l_00N.lvdash.json`, templated by
+      `build_dashboard_config.py`), each hardcoded to its own `project_id`
+      (no interactive filter needed) and linked via
+      `uiSettings.genieSpace.overrideId` to that project's Phase 7 Genie
+      agent — so the dashboard's own built-in "Ask Genie" button is
+      correctly, statically scoped per project, with no second chat surface
+      in the app. `resources/dashboards/*.dashboard.yml` (`bundle deploy`
+      creates/updates all 5); `DashboardEmbed.tsx` now looks up the right
+      dashboard ID per project via `/api/config?projectId=...`
+      (`server/routes/config.ts`) instead of appending a filter parameter to
+      one shared dashboard. Verified live: each dashboard's
+      `uiSettings.genieSpace.overrideId` matches its project's real Genie
+      space ID, and each dashboard's dataset queries are hardcoded to that
+      project's own line count (spot-checked BM-L-001 → 22 lines, BM-L-005 →
+      15 lines, matching each project's real row count).
+- [ ] Phase 9 — simulate/reset jobs + polish
 
 ## Known follow-ups (need your real browser, not just my CLI access)
 
-1. **Dashboard embed filter parameter.** Databricks documents the pattern as
-   `f_<pageId>~<widgetId>=<value>`, but its own example uses opaque
-   generated ids, not necessarily the human-readable page/widget `name`
-   values we set in the dashboard JSON (page `main`, widget
-   `filter_project`). `DashboardEmbed.tsx` uses those names verbatim as the
-   best-documented guess. **Open a project in the app and check whether the
-   embedded dashboard is actually filtered to that project** — if not, open
-   the dashboard directly, manually set the Project filter, and copy the
-   resulting URL's `f_...=` parameter name into `DashboardEmbed.tsx`.
-2. **Embedding domain allowlist.** If the iframe renders blank/blocked
-   instead of the dashboard, a workspace admin needs to allow this app's
-   domain — open the dashboard's **Share → Embed dashboard** dialog in the
-   Databricks UI, which shows the exact domain to add and lets an admin add
-   it directly.
-3. Republishing the dashboard after editing `project_progress.lvdash.json`
-   requires **both** `databricks bundle deploy` (updates the draft) **and**
+1. **Embedding domain allowlist.** If a dashboard iframe renders
+   blank/blocked instead of the dashboard, a workspace admin needs to allow
+   this app's domain — open any dashboard's **Share → Embed dashboard**
+   dialog in the Databricks UI, which shows the exact domain to add and lets
+   an admin add it directly.
+2. Republishing a dashboard after editing its `.lvdash.json` requires
+   **both** `databricks bundle deploy` (updates the draft) **and**
    `databricks lakeview publish <id> --warehouse-id a4e59a1f13ab8b9a
-   --embed-credentials` (publishes it — `bundle deploy` alone does not).
+   --embed-credentials` (publishes it — `bundle deploy` alone does not). With
+   5 dashboards now, that's 5 publish calls after any shared-template change
+   to `build_dashboard_config.py`.
+3. **Confirm the dashboard's built-in "Ask Genie" button in a real browser**
+   — open a project, click it, and check it answers correctly scoped to that
+   project (it should, per the `overrideId` link, but this hasn't been
+   clicked through a real browser session, only verified via the CLI/API
+   that the link itself is correctly configured).

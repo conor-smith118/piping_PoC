@@ -10,10 +10,6 @@ import {
   Skeleton,
   Alert,
   Progress,
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
 } from '@databricks/appkit-ui/react';
 import { ArrowLeft } from 'lucide-react';
 import { api, type ProjectDetail, type LineRow, type Me } from '../lib/api';
@@ -22,7 +18,6 @@ import { RoleBadge } from '../components/RoleBadge';
 import { KanbanBoard } from '../components/KanbanBoard';
 import { LineDetailPanel, NewLinePanel } from '../components/LineDetailPanel';
 import { DashboardEmbed } from '../components/DashboardEmbed';
-import { GenieAssistant } from '../components/GenieAssistant';
 
 export function ProjectView() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -98,21 +93,10 @@ export function ProjectView() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm">Project Insights</CardTitle>
+          <CardTitle className="text-sm">Project Progress Dashboard</CardTitle>
         </CardHeader>
         <CardContent>
-          <Tabs defaultValue="dashboard">
-            <TabsList>
-              <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
-              <TabsTrigger value="genie">Ask Genie</TabsTrigger>
-            </TabsList>
-            <TabsContent value="dashboard">
-              <DashboardEmbed projectId={project.projectId} />
-            </TabsContent>
-            <TabsContent value="genie">
-              <GenieAssistant projectId={project.projectId} />
-            </TabsContent>
-          </Tabs>
+          <DashboardEmbed key={project.projectId} projectId={project.projectId} />
         </CardContent>
       </Card>
 

@@ -10,7 +10,7 @@ resources:
       lifecycle:
         started: true
 
-      # Still no `iam.*` scopes declared: user authorization is GA and on by
+      # No `iam.*` scopes declared: user authorization is GA and on by
       # default for every Databricks App (confirmed against the workspace's
       # own API — explicitly listing `iam.current-user:read` /
       # `iam.access-control:read` is rejected as INVALID_PARAMETER_VALUE
@@ -19,16 +19,12 @@ resources:
       # memberships (getRequestIdentity in server/lib/auth.ts) — the whole
       # role-authorization model — relies on exactly those defaults, which
       # are present with no declaration needed. Kanban/picker/dashboard reads
-      # still go through the Lakebase plugin's service-principal pool or the
-      # dashboard's own embed_credentials, not OBO.
-      #
-      # `dashboards.genie` IS a real, requestable OBO scope (distinct from
-      # the automatic `iam.*` defaults above) — required so the app's genie()
-      # plugin can forward the asking user's own access token to the Genie
-      # Conversation API (see server/server.ts and the per-project GenieChat
-      # panel in ProjectView.tsx). Without it, every chat request 403s.
-      user_api_scopes:
-        - dashboards.genie
+      # go through the Lakebase plugin's service-principal pool or the
+      # dashboard's own embed_credentials, not OBO. (An earlier version of
+      # this file also declared `dashboards.genie` for an app-level Genie
+      # chat plugin — reverted; per-project Genie access is now entirely
+      # native to each project's own dashboard, see
+      # resources/dashboards/*.dashboard.yml.)
 
       resources:
         - name: postgres
@@ -36,33 +32,3 @@ resources:
             branch: projects/${var.lakebase_project_id}/branches/${var.lakebase_branch_id}
             database: projects/${var.lakebase_project_id}/branches/${var.lakebase_branch_id}/databases/${var.lakebase_database_id}
             permission: CAN_CONNECT_AND_CREATE
-
-        # One app-resource binding per project Genie space (Phase 7), so the
-        # app is registered as a consumer of all 5 — the actual per-user
-        # authorization to invoke them comes from the `permissions:` blocks
-        # added to resources/genie_spaces/*.genie-space.yml, not from this.
-        - name: genie-bm-l-001
-          genie_space:
-            name: genie-bm-l-001
-            space_id: ${resources.genie_spaces.bm_l_001.id}
-            permission: CAN_RUN
-        - name: genie-bm-l-002
-          genie_space:
-            name: genie-bm-l-002
-            space_id: ${resources.genie_spaces.bm_l_002.id}
-            permission: CAN_RUN
-        - name: genie-bm-l-003
-          genie_space:
-            name: genie-bm-l-003
-            space_id: ${resources.genie_spaces.bm_l_003.id}
-            permission: CAN_RUN
-        - name: genie-bm-l-004
-          genie_space:
-            name: genie-bm-l-004
-            space_id: ${resources.genie_spaces.bm_l_004.id}
-            permission: CAN_RUN
-        - name: genie-bm-l-005
-          genie_space:
-            name: genie-bm-l-005
-            space_id: ${resources.genie_spaces.bm_l_005.id}
-            permission: CAN_RUN

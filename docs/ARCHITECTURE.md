@@ -263,9 +263,9 @@ manifest` at build time.**
   role on (join `gold_project_rollup` + `live_user_project_role`); Admins see all.
 - **`/projects/:projectId`** — Main view: 6-stage timeline (from
   `gold_project_rollup`), role badge top-right (effective role, see Auth below),
-  "View as role" dropdown next to it (Admin-group members only), a "Project
-  Insights" card tabbed between the embedded dashboard and a per-project Genie
-  chat (see "Genie chat integration in the app" below), Kanban board (6 columns)
+  "View as role" dropdown next to it (Admin-group members only), that project's
+  own embedded dashboard — including its built-in, natively-linked "Ask Genie"
+  button (see "Dashboards + native Genie" below) — Kanban board (6 columns)
   of `gold_line_status` rows.
 - **`/projects/:projectId/lines/:lineId`** — Line detail slide-over: full line-list
   record, isometric/P&ID reference links, per-line stage-history timeline, true-up
@@ -308,25 +308,15 @@ only offers roles the tester is *actually* a group-member of.
 separate unbounded-bypass code path that would let a demo show behavior no real
 account setup could reproduce.
 
-## Dashboard (single, parameterized)
+## Dashboards (one per project, superseded design)
 
-One Lakeview dashboard (`src/dashboards/project_progress.lvdash.json`), datasets over
-`gold_line_status` / `gold_project_rollup`, with a `project_id` filter field (built
-per `databricks-aibi-dashboards`' field-based filter pattern — `filter-single-select`
-bound to `project_id`, `disaggregated: false`). Deployed via
-`resources/dashboards.project_progress.yml` (`dataset_catalog`/`dataset_schema` as
-flags per the skill's create/update workflow), then `databricks lakeview publish`.
-
-Embedded via `<iframe src={dashboardUrl}?f_project_id=<projectId>>` on
-`/projects/:projectId`.
-
-**Verify at build time:** the exact query-parameter/embed-token mechanism for fixing
-a published dashboard's filter value per embed (vs. the JSON's `selection.
-defaultSelection`, which is baked in at deploy time and shared across all viewers).
-This is flagged because neither the dashboard skill's reference content nor this
-plan's research confirmed the precise embed-time override syntax — treat it as a
-short, isolated build-time spike (test against one manually-published dashboard
-before wiring the app) rather than an assumption to build the rest of the app on.
+**Current design (Phase 8b) — see "Dashboards + native Genie" below.** This
+section is kept for history: the original plan (and Phase 5's actual build)
+was **one shared** Lakeview dashboard, datasets over `gold_line_status` /
+`gold_project_rollup`, with a `project_id` filter field, embedded via
+`<iframe src={dashboardUrl}?f_project_id=<projectId>>`. That was replaced
+once it became clear a single dashboard object can't be natively,
+correctly linked to a specific project's Genie agent — see below.
 
 ## Genie agents (one per live project, static per-project views, bundle-managed)
 
@@ -358,46 +348,64 @@ geniespace.json` and scaffold `resources/genie_spaces/<project_id>.genie-space.y
 resource files and `.geniespace.json`s. From then on, `databricks bundle deploy`
 creates/updates all 5 agents alongside everything else; no standalone script needed.
 
-## Genie chat integration in the app (per-project, not dashboard-native)
+## Dashboards + native Genie (current design, Phase 8b)
 
-The dashboard's native Genie link (`uiSettings.genieSpace.overrideId` in the
-`.lvdash.json`) bakes a single, static space ID into the dashboard *object*
-itself. That's fundamentally incompatible with this PoC's "one shared
-dashboard, parameterized per-embed by a `project_id` filter" decision (see
-"Dashboard" above) — a static ID can never track project selection. Rather
-than re-architecting the dashboard, the Genie chat surface lives in the app
-itself, additively:
+Two designs were tried and superseded before landing here — worth recording
+why, since both were reasonable-looking first instincts:
 
-- **Server** (`server/server.ts`): AppKit's `genie()` plugin accepts a
-  `spaces` map of `alias -> Genie Space ID`. All 5 project spaces are
-  registered under a `GENIE_SPACES` constant keyed by **literal `project_id`**
-  (`"BM-L-001"` → its space ID, etc., read from per-project env vars that
-  `app.yaml` wires from the matching `genie_space` app resource in
-  `resources/app.burns_piping_poc.yml`). A `dashboards.genie` entry in
-  `user_api_scopes` is required for the plugin's OBO calls to the Genie
-  Conversation API (a real, requestable scope — unlike the automatic `iam.*`
-  defaults the rest of the app's auth model relies on).
-- **Client** (`components/GenieAssistant.tsx`, used from `ProjectView.tsx`'s
-  "Ask Genie" tab): renders `<GenieChat alias={project.projectId} />`. Since
-  the alias is exactly the current project's `project_id` — the same string
-  key the server's map uses — the chat automatically re-points to the correct
-  project's agent on every navigation, with no separate lookup table on
-  either side to drift out of sync. `key={project.projectId}` forces a full
-  remount on project switch so no conversation state carries over between
-  agents.
-- **Permissions**: each `resources/genie_spaces/*.genie-space.yml` grants
-  `CAN_RUN` to all 4 workspace groups (`Estimator`, `Lead Engineer`,
-  `Design Lead`, `piping_admin`) — this, not the app-resource binding, is what
-  lets a real end user (not just the bundle's deploying identity) actually
-  invoke the space via OBO.
+1. **One shared dashboard + a `project_id` filter** (Phase 5). Simple, but a
+   dashboard's native Genie link (`uiSettings.genieSpace.overrideId`) is one
+   static space ID baked into the dashboard *object* — incompatible with a
+   shared dashboard, since a static ID can never track which project the
+   viewer currently has selected.
+2. **Keep the shared dashboard, add a separate in-app Genie chat tab**
+   (Phase 8a) — AppKit's `genie()` plugin with a per-project `spaces` map,
+   rendered via `<GenieChat alias={project.projectId} />`. This *worked* —
+   verified live, correct project-scoped answers — but every Lakeview
+   dashboard also gets a **default built-in "Ask Genie" button**
+   automatically (confirmed by observing one on the Phase 5 dashboard, which
+   had no `uiSettings.genieSpace` configured at all — the field's own name,
+   "**override**Id", implies a default exists to override). Two "Ask Genie"
+   entry points on the same page reads as a bug, not a feature.
 
-**Verified live** (Phase 8 build): direct calls to the deployed app's
-`/api/genie/BM-L-001/messages` and `/api/genie/BM-L-002/messages` with the
-same question ("How many lines are in this project in total?") returned two
-different, correct, project-scoped answers (22 vs. 19 lines), each hitting
-that project's own `spaceId` and `vw_genie_<project>_lines` view — confirming
-alias-to-project alignment works end-to-end through the app, not just
-directly against Genie as in the Phase 7 checkpoint.
+**Current design: one dashboard per project**, each natively linked to that
+project's own agent — a single integrated surface, no separate chat tab:
+
+- `src/dashboards/build_dashboard_config.py` generates 5 near-identical
+  dashboards from the Phase 5 template, for each project: (a) hardcodes
+  `AND project_id = '<project_id>'` into both dataset queries (no
+  interactive filter widget needed — mirrors the static per-project Genie
+  views from Phase 7), (b) sets
+  `uiSettings.genieSpace = {isEnabled: true, overrideId: <that project's
+  real Genie space ID>, enablementMode: "ENABLED"}`. Space IDs are hardcoded
+  literals (same reasoning as `DASHBOARD_ID` originally being one) — a
+  `file_path`-loaded dashboard JSON is opaque to bundle variable
+  substitution, so `${resources.genie_spaces...}` can't reach inside it.
+- `resources/dashboards/*.dashboard.yml` (5 files, resource keys
+  `dash_bm_l_00N` — plain `bm_l_00N` collides with the genie_spaces resource
+  of the same name) — `bundle deploy` creates/updates all 5; each still
+  needs a separate `databricks lakeview publish --embed-credentials` after
+  any change (bundle deploy only updates the draft).
+- `server/routes/config.ts`'s `/api/config` now takes a `projectId` query
+  param and looks up that project's own dashboard ID from 5 env vars
+  (`DASHBOARD_ID_BM_L_00N`, set as plain literals in `app.yaml` — no AppKit
+  "dashboard" resource type exists to bind them via `valueFrom`).
+  `DashboardEmbed.tsx` calls it per-project instead of appending a filter
+  query parameter to one shared dashboard URL.
+- Phase 8a's `genie()` plugin, `GenieAssistant.tsx`, `dashboards.genie` OBO
+  scope, and the 5 `genie_space` app-resource bindings were all removed —
+  the app itself no longer talks to the Genie Conversation API at all. The
+  `CAN_RUN` permission grants on each Genie space
+  (`resources/genie_spaces/*.genie-space.yml`) stayed, since real end users
+  still need that permission to use each dashboard's built-in Genie button,
+  regardless of which mechanism reaches the space.
+
+**Verified live:** each dashboard's `uiSettings.genieSpace.overrideId`
+matches its project's real Genie space ID (checked via `lakeview get` for
+BM-L-001 and BM-L-005), and each dashboard's own dataset queries return
+exactly that project's line count (BM-L-001 → 22, BM-L-005 → 15) rather than
+all 5 projects' data. Not yet confirmed in an actual browser: clicking the
+built-in "Ask Genie" button itself (see README "Known follow-ups").
 
 ## ML pipeline
 

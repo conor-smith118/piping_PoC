@@ -2,23 +2,22 @@ command: ['npm', 'run', 'start']
 env:
   - name: LAKEBASE_ENDPOINT
     valueFrom: postgres
-  # Plain identifier, not a permission-bearing resource — there's no
-  # AppKit "dashboard" resource type (see server/routes/config.ts).
-  - name: DASHBOARD_ID
-    value: '01f1bbad3b7713adbb0a7f2f2cb57900'
-  # AppKit's genie() plugin validates DATABRICKS_GENIE_SPACE_ID is set on
-  # startup even when a custom `spaces` map is passed in code (server.ts) —
-  # points at BM-L-001 as an arbitrary default/fallback, never actually used
-  # since every real call in this app passes an explicit per-project alias.
-  - name: DATABRICKS_GENIE_SPACE_ID
-    valueFrom: genie-bm-l-001
-  - name: DATABRICKS_GENIE_SPACE_BM_L_001
-    valueFrom: genie-bm-l-001
-  - name: DATABRICKS_GENIE_SPACE_BM_L_002
-    valueFrom: genie-bm-l-002
-  - name: DATABRICKS_GENIE_SPACE_BM_L_003
-    valueFrom: genie-bm-l-003
-  - name: DATABRICKS_GENIE_SPACE_BM_L_004
-    valueFrom: genie-bm-l-004
-  - name: DATABRICKS_GENIE_SPACE_BM_L_005
-    valueFrom: genie-bm-l-005
+  # One dashboard per project now (Option B — see
+  # docs/ARCHITECTURE.md), each natively linked to its own project's Genie
+  # agent via that dashboard's own uiSettings.genieSpace.overrideId. Plain
+  # literals, not permission-bearing resources — there's no AppKit
+  # "dashboard" resource type (see server/routes/config.ts). Placeholder
+  # values below get overwritten with the real ids once the 5 dashboards in
+  # resources/dashboards/*.dashboard.yml are deployed for the first time
+  # (`databricks bundle summary` or `databricks lakeview list` to read them
+  # back).
+  - name: DASHBOARD_ID_BM_L_001
+    value: '01f1bc2d96af1c5d89b8da06e2ba6785'
+  - name: DASHBOARD_ID_BM_L_002
+    value: '01f1bc2d96ba1bceabffb8402ec8fb3c'
+  - name: DASHBOARD_ID_BM_L_003
+    value: '01f1bc2d96b91b408024f87ba463ccf7'
+  - name: DASHBOARD_ID_BM_L_004
+    value: '01f1bc2d96ba1c8387ea2175f5b1f8a8'
+  - name: DASHBOARD_ID_BM_L_005
+    value: '01f1bc2d96ce169f9c69b985af48289c'

@@ -1,0 +1,12 @@
+resources:
+  dashboards:
+    dash_bm_l_004:
+      display_name: "Piping Project Progress — BM-L-004"
+      parent_path: /Workspace/Users/conor.smith@databricks.com/piping_poc_dashboards
+      file_path: ../../src/dashboards/project_progress_bm_l_004.lvdash.json
+      warehouse_id: ${var.warehouse_id}
+      dataset_catalog: ${var.catalog}
+      dataset_schema: ${var.schema}
+      embed_credentials: true
+      # See bm_l_001.dashboard.yml for why this is one-dashboard-per-project
+      # and why a manual `lakeview publish` is still required after deploy.

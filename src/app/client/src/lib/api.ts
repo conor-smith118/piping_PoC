@@ -109,7 +109,7 @@ export interface DashboardConfig {
 
 export const api = {
   me: () => request<Me>('/api/me'),
-  getConfig: () => request<DashboardConfig>('/api/config'),
+  getConfig: (projectId: string) => request<DashboardConfig>(`/api/config?projectId=${encodeURIComponent(projectId)}`),
   setViewAs: (role: Role | null) =>
     request<{ role: Role | null }>('/api/view-as', { method: 'POST', body: JSON.stringify({ role }) }),
 
