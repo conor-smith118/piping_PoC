@@ -1,0 +1,16 @@
+resources:
+  dashboards:
+    project_progress:
+      display_name: "Piping Project Progress"
+      parent_path: /Workspace/Users/conor.smith@databricks.com/piping_poc_dashboards
+      file_path: ../src/dashboards/project_progress.lvdash.json
+      warehouse_id: ${var.warehouse_id}
+      dataset_catalog: ${var.catalog}
+      dataset_schema: ${var.schema}
+      embed_credentials: true
+      # `bundle deploy` creates/updates the DRAFT dashboard only — it does
+      # NOT publish it (publish is a separate action, `databricks lakeview
+      # publish <id> --embed-credentials`, unrelated to bundle deploy). The
+      # embedded app reads the PUBLISHED version, so that manual publish
+      # step (documented in ARCHITECTURE.md) is still required after every
+      # deploy that changes this file, even with embed_credentials set here.

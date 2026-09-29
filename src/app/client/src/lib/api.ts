@@ -102,8 +102,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
+export interface DashboardConfig {
+  dashboardId: string | null;
+  embedBaseUrl: string | null;
+}
+
 export const api = {
   me: () => request<Me>('/api/me'),
+  getConfig: () => request<DashboardConfig>('/api/config'),
   setViewAs: (role: Role | null) =>
     request<{ role: Role | null }>('/api/view-as', { method: 'POST', body: JSON.stringify({ role }) }),
 

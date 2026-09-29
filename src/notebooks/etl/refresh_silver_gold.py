@@ -144,7 +144,8 @@ stage_stats AS (
   -- warehouse before relying on it here.
   SELECT project_id,
          MODE(current_stage) AS mode_stage,
-         MIN(current_stage) AS min_stage
+         MIN(current_stage) AS min_stage,
+         AVG(DATEDIFF(CURRENT_TIMESTAMP(), latest_event_timestamp)) AS avg_days_in_current_stage
   FROM {CATALOG}.{SCHEMA}.gold_line_status
   WHERE NOT is_complete
   GROUP BY project_id
@@ -155,7 +156,7 @@ SELECT
   CAST(c.lines_complete AS DOUBLE) / c.total_lines AS pct_lines_complete,
   COALESCE(s.mode_stage, 6) AS mode_stage,
   COALESCE(s.min_stage, 6) AS min_stage,
-  CAST(NULL AS DOUBLE) AS avg_days_in_current_stage,
+  COALESCE(s.avg_days_in_current_stage, 0.0) AS avg_days_in_current_stage,
   p.data_origin
 FROM {CATALOG}.{SCHEMA}.v_projects p
 JOIN counts c ON c.project_id = p.project_id

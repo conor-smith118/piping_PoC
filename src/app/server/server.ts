@@ -3,6 +3,7 @@ import { registerMeRoutes } from './routes/me';
 import { registerViewAsRoutes } from './routes/viewAs';
 import { registerProjectRoutes } from './routes/projects';
 import { registerLineRoutes } from './routes/lines';
+import { registerConfigRoutes } from './routes/config';
 import type { AppKitHandle } from './lib/appkitTypes';
 
 // Defense in depth: every route handler in routes/*.ts has its own
@@ -50,5 +51,6 @@ createApp({
     registerViewAsRoutes(appkit);
     registerProjectRoutes(appkit);
     registerLineRoutes(appkit);
+    registerConfigRoutes(appkit);
   },
 }).catch(console.error);

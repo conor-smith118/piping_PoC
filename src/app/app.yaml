@@ -2,3 +2,7 @@ command: ['npm', 'run', 'start']
 env:
   - name: LAKEBASE_ENDPOINT
     valueFrom: postgres
+  # Plain identifier, not a permission-bearing resource — there's no
+  # AppKit "dashboard" resource type (see server/routes/config.ts).
+  - name: DASHBOARD_ID
+    value: '01f1bbad3b7713adbb0a7f2f2cb57900'

@@ -17,6 +17,7 @@ import { Timeline } from '../components/Timeline';
 import { RoleBadge } from '../components/RoleBadge';
 import { KanbanBoard } from '../components/KanbanBoard';
 import { LineDetailPanel, NewLinePanel } from '../components/LineDetailPanel';
+import { DashboardEmbed } from '../components/DashboardEmbed';
 
 export function ProjectView() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -95,9 +96,7 @@ export function ProjectView() {
           <CardTitle className="text-sm">Project Progress Dashboard</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center justify-center h-48 border border-dashed rounded-md text-sm text-muted-foreground">
-            Embedded AI/BI dashboard lands in Phase 5 (parameterized to project_id={project.projectId})
-          </div>
+          <DashboardEmbed projectId={project.projectId} />
         </CardContent>
       </Card>
 

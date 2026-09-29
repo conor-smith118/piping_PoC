@@ -53,9 +53,44 @@ this repo references.
       persisted correctly. See `src/sql/lakebase/01_grant_app_access.sql` —
       required once after first deploy so the app's service principal can
       read/write the tables created in Phase 0.
-- [ ] Phase 4 — Lakebase → Delta CDC wiring
-- [ ] Phase 5 — dashboard
+- [x] Phase 4 — Lakebase → Delta CDC wiring. Lakehouse Sync CDF config
+      (`burns_piping_poc_sync`) enabled against `public`; all 6
+      `lb_*_history` tables confirmed `CDF_STATE_STREAMING`.
+      `refresh_silver_gold` (Lakeflow Job) dedups them into `live_*` and
+      rebuilds `gold_line_status` / `gold_project_rollup`. Verified live: the
+      Phase 2-3 checkpoint's test write is correctly reflected in
+      `gold_line_status` after running the job.
+- [x] Phase 5 — dashboard. "Piping Project Progress"
+      (`src/dashboards/project_progress.lvdash.json`) — KPIs, stage
+      breakdown bar chart, completion pie, line-detail table, single
+      `project_id` filter — published with `embed_credentials=true` and
+      embedded in `/projects/:projectId` via `DashboardEmbed.tsx`. **Two
+      things need your confirmation in a real browser** (see "Known
+      follow-ups" below): the exact filter query-parameter encoding, and
+      whether this app's domain needs a workspace-admin embedding-allowlist
+      addition.
 - [ ] Phase 6 — ML model
 - [ ] Phase 7 — Genie agents
 - [ ] Phase 8 — simulate/reset jobs
 - [ ] Phase 9 — polish
+
+## Known follow-ups (need your real browser, not just my CLI access)
+
+1. **Dashboard embed filter parameter.** Databricks documents the pattern as
+   `f_<pageId>~<widgetId>=<value>`, but its own example uses opaque
+   generated ids, not necessarily the human-readable page/widget `name`
+   values we set in the dashboard JSON (page `main`, widget
+   `filter_project`). `DashboardEmbed.tsx` uses those names verbatim as the
+   best-documented guess. **Open a project in the app and check whether the
+   embedded dashboard is actually filtered to that project** — if not, open
+   the dashboard directly, manually set the Project filter, and copy the
+   resulting URL's `f_...=` parameter name into `DashboardEmbed.tsx`.
+2. **Embedding domain allowlist.** If the iframe renders blank/blocked
+   instead of the dashboard, a workspace admin needs to allow this app's
+   domain — open the dashboard's **Share → Embed dashboard** dialog in the
+   Databricks UI, which shows the exact domain to add and lets an admin add
+   it directly.
+3. Republishing the dashboard after editing `project_progress.lvdash.json`
+   requires **both** `databricks bundle deploy` (updates the draft) **and**
+   `databricks lakeview publish <id> --warehouse-id a4e59a1f13ab8b9a
+   --embed-credentials` (publishes it — `bundle deploy` alone does not).
