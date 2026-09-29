@@ -1,0 +1,34 @@
+resources:
+  jobs:
+    simulate_new_data:
+      name: "Piping PoC — Simulate New Data"
+      description: >-
+        Manual-trigger demo job: writes new stage-1 lines and advances a
+        sample of existing in-flight lines by one stage each, straight
+        against Lakebase (same write shape as the app's own stage-action
+        routes) — exercises the real CDC path end to end. Chains
+        refresh_silver_gold, then ml_batch_inference, so the dashboards,
+        Kanban gold table, and ML predictions are all caught up by the time
+        this job finishes.
+      tasks:
+        - task_key: simulate
+          notebook_task:
+            notebook_path: ../src/notebooks/simulate/simulate_new_data.py
+            base_parameters:
+              lakebase_project_id: ${var.lakebase_project_id}
+              lakebase_branch_id: ${var.lakebase_branch_id}
+              lakebase_endpoint_id: ${var.lakebase_endpoint_id}
+          # no cluster config -> serverless
+        - task_key: refresh_gold
+          depends_on:
+            - task_key: simulate
+          run_job_task:
+            job_id: ${resources.jobs.refresh_silver_gold.id}
+        - task_key: rescore_predictions
+          depends_on:
+            - task_key: refresh_gold
+          run_job_task:
+            job_id: ${resources.jobs.ml_batch_inference.id}
+      # Deliberately no `schedule`/`trigger` block — manual run-now only
+      # (Jobs UI or `databricks bundle run simulate_new_data`), per the PoC's
+      # "repeatable demo, not a live production feed" requirement.

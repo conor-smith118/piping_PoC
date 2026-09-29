@@ -1,0 +1,38 @@
+resources:
+  jobs:
+    reset_poc:
+      name: "Piping PoC — Reset to Seed"
+      description: >-
+        Manual-trigger demo job: wipes all 6 Lakebase tables and replays
+        src/sql/lakebase/seed_live_data.sql verbatim (the same frozen,
+        deterministic seed applied once at initial setup — never
+        regenerated with a new random seed), restoring the 5 live projects
+        to their exact original state. Chains refresh_silver_gold, then
+        ml_batch_inference, so the dashboards/Genie agents/ML predictions
+        land back on the restored baseline instead of stale or empty.
+      tasks:
+        - task_key: reset
+          notebook_task:
+            notebook_path: ../src/notebooks/reset/reset_poc.py
+            base_parameters:
+              lakebase_project_id: ${var.lakebase_project_id}
+              lakebase_branch_id: ${var.lakebase_branch_id}
+              lakebase_endpoint_id: ${var.lakebase_endpoint_id}
+              # Bundle-deployed absolute workspace path to the checked-in seed
+              # file — `${workspace.root_path}` is DABs' built-in reference to
+              # this target's deploy root; `bundle deploy` syncs the whole
+              # repo tree under `<root_path>/files/...`, so the seed file
+              # always lands at this exact path relative to it.
+              seed_sql_path: ${workspace.root_path}/files/src/sql/lakebase/seed_live_data.sql
+          # no cluster config -> serverless
+        - task_key: refresh_gold
+          depends_on:
+            - task_key: reset
+          run_job_task:
+            job_id: ${resources.jobs.refresh_silver_gold.id}
+        - task_key: rescore_predictions
+          depends_on:
+            - task_key: refresh_gold
+          run_job_task:
+            job_id: ${resources.jobs.ml_batch_inference.id}
+      # Deliberately no `schedule`/`trigger` block — manual run-now only.

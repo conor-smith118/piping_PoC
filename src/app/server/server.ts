@@ -4,6 +4,7 @@ import { registerViewAsRoutes } from './routes/viewAs';
 import { registerProjectRoutes } from './routes/projects';
 import { registerLineRoutes } from './routes/lines';
 import { registerConfigRoutes } from './routes/config';
+import { registerAdminRoutes } from './routes/admin';
 import type { AppKitHandle } from './lib/appkitTypes';
 
 // Note: an earlier version of this file registered AppKit's genie() plugin
@@ -61,5 +62,6 @@ createApp({
     registerProjectRoutes(appkit);
     registerLineRoutes(appkit);
     registerConfigRoutes(appkit);
+    registerAdminRoutes(appkit);
   },
 }).catch(console.error);

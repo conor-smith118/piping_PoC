@@ -107,6 +107,21 @@ export interface DashboardConfig {
   embedBaseUrl: string | null;
 }
 
+export interface RoleAssignment {
+  userEmail: string;
+  projectId: string;
+  role: Role;
+  assignedBy: string | null;
+  assignedAt: string;
+}
+
+export interface AdminOverview {
+  projects: Array<{ projectId: string; projectName: string }>;
+  assignments: RoleAssignment[];
+  roles: Role[];
+  roleToGroup: Record<Role, string>;
+}
+
 export const api = {
   me: () => request<Me>('/api/me'),
   getConfig: (projectId: string) => request<DashboardConfig>(`/api/config?projectId=${encodeURIComponent(projectId)}`),
@@ -136,4 +151,10 @@ export const api = {
     request(`/api/lines/${lineId}/true-up/final`, { method: 'POST', body: JSON.stringify(body) }),
   confirmFinalTrueUp: (lineId: string) =>
     request(`/api/lines/${lineId}/true-up/final/confirm`, { method: 'POST', body: JSON.stringify({}) }),
+
+  getAdminOverview: () => request<AdminOverview>('/api/admin/overview'),
+  assignRole: (userEmail: string, projectId: string, role: Role) =>
+    request<RoleAssignment>('/api/admin/roles', { method: 'POST', body: JSON.stringify({ userEmail, projectId, role }) }),
+  revokeRole: (userEmail: string, projectId: string) =>
+    request<void>('/api/admin/roles', { method: 'DELETE', body: JSON.stringify({ userEmail, projectId }) }),
 };

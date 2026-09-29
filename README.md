@@ -118,7 +118,29 @@ this repo references.
       space ID, and each dashboard's dataset queries are hardcoded to that
       project's own line count (spot-checked BM-L-001 → 22 lines, BM-L-005 →
       15 lines, matching each project's real row count).
-- [ ] Phase 9 — simulate/reset jobs + polish
+- [x] Phase 9 — simulate/reset jobs + polish.
+      **`simulate_new_data`** (`src/notebooks/simulate/simulate_new_data.py`):
+      connects to Lakebase via `w.postgres.generate_database_credential` +
+      psycopg2, inserts 3-8 new stage-1 lines and advances a random sample of
+      in-flight lines by one stage each (same write shape as the app's own
+      stage-action routes) — chains `refresh_silver_gold` then
+      `ml_batch_inference` via `run_job_task`.
+      **`reset_poc`** (`src/notebooks/reset/reset_poc.py`): unconditionally
+      `DELETE`s all 6 Lakebase tables (child-to-parent FK order — safe
+      because Lakebase holds *only* these 5 projects' data) and replays
+      `seed_live_data.sql` verbatim, then chains the same two jobs. Both are
+      manual-trigger only (no `schedule` block). **Verified live end-to-end:**
+      ran `simulate_new_data` (93→100 lines, 7 new `-SIM-` lines, predictions
+      83→90), then `reset_poc` (back to exactly 93 lines, 0 `-SIM-` lines,
+      predictions back to exactly 83 — matching Phase 6's original recorded
+      count byte-for-byte).
+      **`/admin`** (`server/routes/admin.ts`, `pages/Admin.tsx`): Admin-only
+      page to assign/revoke per-project role assignments across all 5
+      projects, plus a static role↔group reference. Deliberately no project
+      create/edit (see `ARCHITECTURE.md`). Verified live: full
+      assign→list→revoke round-trip against the real API.
+      **`docs/DEMO_SCRIPT.md`** rewritten from a placeholder into a concrete,
+      timed walkthrough covering every phase.
 
 ## Known follow-ups (need your real browser, not just my CLI access)
 

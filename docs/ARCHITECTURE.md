@@ -272,9 +272,15 @@ manifest` at build time.**
   baseline-vs-actual side-by-side when applicable, and the one action button for
   whatever stage the line is at — rendered only if `effectiveRole` matches the
   required role (Estimator→1, Lead Engineer→2/4/6, Design Lead→3/5).
-- **`/admin`** — Admin-only: create/edit projects, manage `user_project_role`
-  assignments (role picker restricted to roles the target user is actually a member
-  of), read-only view of the 4 groups and members.
+- **`/admin`** — Admin-only (Phase 9): manage `user_project_role` assignments
+  (assign/revoke, any project × any role) and a static reference of which
+  workspace group each in-app role maps to. **No project create/edit** — this
+  PoC's 5 live projects are each hardcoded into their own dashboard
+  (`resources/dashboards/*.dashboard.yml`) and Genie agent
+  (`resources/genie_spaces/*.genie-space.yml`); a 6th project created here
+  would silently get neither. Real project provisioning would need to extend
+  those bundle resources too, not just insert a Lakebase row — out of scope
+  for this PoC.
 
 ## Auth / authorization design
 
@@ -296,9 +302,17 @@ and every write-route's server-side check:
    the override instead. Otherwise return the result of step 2.
 
 **Reconciliation rule:** group membership = coarse eligibility ("which roles can this
-person ever hold"); `user_project_role` = actual per-project assignment. The
-`/admin` assignment UI enforces "assignment ⊆ eligibility" at write-time, so an
-invalid assignment can never be created.
+person ever hold"); `user_project_role` = actual per-project assignment.
+`getEffectiveRole` step 2 above enforces "assignment ⊆ eligibility" at **read**
+time, on every request — not by validating at write-time in `/admin`. The admin
+route (`server/routes/admin.ts`) writes `user_project_role` rows without an
+independent live check that the target user actually belongs to the matching
+workspace group (that would need a workspace-directory/SCIM Groups call under
+a more-privileged identity than this app has ever needed elsewhere), but this
+isn't a security gap: a mismatched assignment just silently has no effect,
+since step 2 won't honor it. `/admin` records *intent*; the real enforcement
+is entirely in `getEffectiveRole`, which is deliberately the *only* place this
+logic lives.
 
 **"View as role" design — bounded, not a superuser bypass:** visible only to
 `piping_admin`-group members (displayed in-app as the "Admin" role); the dropdown
@@ -440,27 +454,49 @@ built-in "Ask Genie" button itself (see README "Known follow-ups").
   `simulate_new_data` (and kept independently runnable) — not on its own schedule, so
   scores don't shift mid-demo unexpectedly.
 
-## Simulation & reset jobs
+## Simulation & reset jobs (Phase 9, built as planned with a few simplifications)
 
 Both jobs have **no `schedule`/`trigger` block** — manual-only (`run-now` via
-CLI/Jobs UI), per the requirement.
+CLI/Jobs UI or `databricks bundle run <job> -t dev`).
 
-- **`simulate_new_data`**: (1) `generate_increment` notebook — connects to Lakebase
-  the same way the app does (`w.postgres.generate_database_credential` OAuth token +
-  psycopg2), inserts a few new stage-1 lines and advances a sample of existing lines
-  one stage (writing the matching `stage_events`/`true_up_records`/`change_log` rows
-  + updating `lines.current_stage`) across the 5 live projects — deliberately through
-  Lakebase, not straight to Delta, so every simulate run exercises the real CDC path
-  (the core "watch it flow through" demo moment); (2) `refresh_silver_gold`
-  (`depends_on` #1); (3) `run_job_task → ml_batch_inference` (optional/skippable).
-- **`reset_poc`**: (1) `reset_lakebase` notebook — row-level `DELETE ... WHERE
-  project_id IN (<5 ids>)` (not `TRUNCATE` — **verify at build time** whether
-  `TRUNCATE` even emits CDC events under this Beta mechanism) across all 6 tables,
-  then re-`INSERT`s a **frozen seed snapshot** generated once at initial setup and
-  stored as static seed SQL/Parquet (never re-randomized on reset, for reproducible
-  demos); (2) `reset_delta` — re-runs `refresh_silver_gold` + clears
-  `gold_ml_predictions` for live rows; (3) `run_job_task → ml_batch_inference` so
-  reset leaves fresh baseline predictions rather than an empty table.
+- **`simulate_new_data`**: task `simulate`
+  (`src/notebooks/simulate/simulate_new_data.py`) connects to Lakebase via
+  `w.postgres.generate_database_credential` + psycopg2 (databricks-lakebase
+  skill's "Pattern 1: Direct Connection" — a fresh token, no refresh loop
+  needed for a one-shot batch job), inserts 3-8 new stage-1 lines and
+  advances a random sample of existing in-flight lines by exactly one stage
+  each — writing the same shape of `stage_events`/`true_up_records`/
+  `change_log` rows + `lines.current_stage` update as the corresponding app
+  route (see the stage-action table above) — across the 5 live projects,
+  deliberately through Lakebase rather than straight to Delta, so every run
+  exercises the real CDC path. Chains `refresh_gold` → `run_job_task` into
+  `refresh_silver_gold`, then `rescore_predictions` → `run_job_task` into
+  `ml_batch_inference` (both unconditional, not optional — a demo always
+  wants the dashboards/Genie/ML surfaces caught up by the time the job
+  finishes, not a separate manual step after).
+- **`reset_poc`**: task `reset` (`src/notebooks/reset/reset_poc.py`)
+  `DELETE`s all 6 Lakebase tables **unconditionally** (no `WHERE project_id
+  IN (...)` needed — Lakebase holds *only* these 5 live projects' data, so
+  an unqualified delete in FK-safe child-to-parent order — `change_log` →
+  `true_up_records` → `stage_events` → `lines` → `user_project_role` →
+  `projects` — is exactly equivalent to a scoped one), then replays
+  `src/sql/lakebase/seed_live_data.sql` verbatim (line-by-line `INSERT`
+  execute, skipping its own `BEGIN;`/`COMMIT;` lines since psycopg2's own
+  transaction already provides that boundary) — the same frozen,
+  deterministic file applied once at initial setup, never regenerated with a
+  new random seed. `TRUNCATE` vs. `DELETE`: went with `DELETE`, and it's
+  confirmed to work correctly with CDC — `refresh_silver_gold`'s
+  `whenNotMatchedBySourceDelete` already correctly drops any PK whose
+  *latest* CDC state is a delete, which after a reset is every row not
+  present in the reseed (including anything `simulate_new_data` added since
+  the last reset). No separate "clear gold_ml_predictions" step turned out
+  to be needed either — `ml_batch_inference` already does a full
+  `write.mode("overwrite")`, so simply re-running it (chained the same way
+  as in `simulate_new_data`) produces a correct fresh baseline on its own.
+  **Verified live end-to-end** (Phase 9 checkpoint): ran `simulate_new_data`
+  (93 → 100 lines, 7 tagged `-SIM-`, predictions 83 → 90), then `reset_poc`
+  (back to exactly 93 lines, 0 `-SIM-` lines, predictions back to exactly 83
+  — matching the original Phase 6 checkpoint's recorded count byte-for-byte).
 
 Historical tables are never touched by either job.
 

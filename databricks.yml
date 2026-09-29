@@ -23,6 +23,9 @@ variables:
     default: production
   lakebase_database_id:
     default: databricks-postgres
+  lakebase_endpoint_id:
+    description: Lakebase read-write endpoint, used by simulate_new_data/reset_poc to connect via psycopg2
+    default: primary
 
 targets:
   dev:
