@@ -202,20 +202,16 @@ this repo references.
       by this machine's proxy, so reused the exact `w.postgres` + psycopg2
       pattern from `simulate_new_data`), then `refresh_silver_gold` to sync
       it through CDC, then regenerated `seed_live_data.sql` so `reset_poc`
-      matches going forward. **Verified via direct query** (not yet a real
-      browser session): an Estimator-scoped query now returns only BM-L-001,
-      a Design-Lead-scoped query only BM-L-003.
+      matches going forward. **Verified live end-to-end in a real incognito
+      browser session**: picking a non-Admin role at login now correctly
+      shows just that one role on the landing page, only that role's single
+      assigned project in the picker, and a matching badge. (A normal,
+      non-incognito session correctly still shows the full identity/all 4
+      roles — no `ag` claim, expected and by design, since that's whichever
+      session was already authenticated before this feature was ever
+      wired in.)
 
 ## Known follow-ups (need your real browser, not just my CLI access)
-
-0. **Confirm both Phase 11 + 12 fixes together, in your own browser.** Open
-   the app in an incognito window, pick a non-Admin role (e.g. Estimator) at
-   the login prompt, and check: the landing page shows just that one role,
-   the project list shows only that role's assigned project (not all 5), and
-   its badge matches. I verified the `ag`-decode logic in isolation and the
-   `/api/projects` query fix via direct SQL, but haven't seen the full path
-   (real incognito login → this exact deployed code → landing page) run
-   start to finish myself.
 
 1. **Embedding domain allowlist.** If a dashboard iframe renders
    blank/blocked instead of the dashboard, a workspace admin needs to allow
