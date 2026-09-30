@@ -1,12 +1,16 @@
 resources:
   jobs:
     refresh_silver_gold:
-      name: "Piping PoC — Refresh Live + Gold Tables (from Lakebase CDC)"
+      name: "Piping PoC — Refresh Live Tables (from Lakebase CDC)"
       description: >-
         Dedups the lb_*_history CDC landing tables (populated by Lakehouse
-        Sync from Lakebase) into live_* Delta tables, then rebuilds
-        gold_line_status / gold_project_rollup. Chained after
-        simulate_new_data (Phase 8); safe to run standalone/repeatedly.
+        Sync from Lakebase) into live_* Delta tables. No longer rebuilds
+        gold_line_status/gold_project_rollup — those are views computed
+        directly from the CDC tables now, so the dashboard/Genie are always
+        live with no dependency on this job. Still needed for
+        live_lines/live_projects, which ml_batch_inference reads directly.
+        Chained after simulate_new_data/reset_poc (Phase 8); safe to run
+        standalone/repeatedly.
       tasks:
         - task_key: refresh
           notebook_task:

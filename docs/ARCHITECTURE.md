@@ -312,6 +312,96 @@ Other notes:
   `ALTER TABLE ... REPLICA IDENTITY FULL;` **before** it will sync — the schema-level
   CDF config covers future tables for sync *eligibility*, not their replica identity.
 
+## Dashboard freshness: query CDC directly instead of waiting on a batch job
+
+Reported live: "when I move projects through the pipeline the dashboard doesn't
+update." Root-caused precisely, not by assumption, with a live timed test:
+
+1. Advanced a real line via the app, timestamped the write.
+2. Immediately queried `lb_lines_history` (the CDC landing table) for that
+   exact line — **the change was already there**, within the same second.
+   CDC itself was never the bottleneck.
+3. Queried `live_lines` (the batch-refreshed table `gold_line_status` was
+   built from at the time) — still showing the *old* value.
+
+So the actual gap: `refresh_silver_gold` (the job that dedups
+`lb_*_history` into `live_*`, then used to rebuild `gold_line_status`/
+`gold_project_rollup` as physical tables) was **never chained to anything
+for direct app usage** — only to `simulate_new_data`/`reset_poc`. A real
+Estimator/Lead Engineer/Design Lead clicking through the actual workflow
+writes straight to Lakebase and nothing ever re-ran that job, so the
+dashboard sat frozen at whatever snapshot the last manual or
+simulate-triggered run happened to leave behind. Confirmed the job's own
+execution floor is ~90-110 seconds regardless of trigger (5 real historical
+runs, all in that range) — dominated by serverless notebook cold-start, not
+the actual work (six small MERGEs).
+
+Two fixes considered and rejected before landing on the real one:
+
+- **Periodic schedule** (e.g. every 1 minute) on `refresh_silver_gold` —
+  simple, but adds up to a full poll interval on top of the job's own
+  ~90-110s floor, so worst case is close to 3 minutes from write to
+  dashboard. Built, then reverted when a better option came up.
+- **App-triggered** (fire-and-forget `jobs().runNow()` after each write,
+  via AppKit's `jobs()` plugin) — removes the polling variance, but the
+  ~90-110s floor is the job's *execution* time, not trigger latency, so
+  this wouldn't have meaningfully helped, and adds a new app→Jobs-API
+  coupling (a job app-resource + `CAN_MANAGE_RUN` grant, code changes
+  across every mutating route, burst/redundant-run risk if multiple
+  actions land close together) to buy back a fraction of a floor that's
+  fixed either way. Not built.
+
+**What actually fixes it**: skip the batch rebuild entirely for the
+dashboard's sake. `gold_line_status`/`gold_project_rollup` are now **views**
+(`src/sql/ddl/04_gold_tables.sql`), not physical tables, built directly on
+top of `v_lines`/`v_stage_history`/`v_true_up_records`/`v_projects`
+(`03_union_views.sql`) — which themselves now compute their LIVE half
+**directly from the `lb_*_history` CDC tables** (a `ROW_NUMBER() OVER
+(PARTITION BY <pk> ORDER BY _pg_lsn DESC)` window, filtering out anything
+whose latest state is a delete — the exact same "latest per PK" logic
+`refresh_silver_gold.py` already used, just expressed as SQL and evaluated
+at query time instead of Python/PySpark on a batch schedule) UNION ALL with
+the unchanged, static `historical_*` tables. Since every dashboard/Genie
+query already just says `SELECT ... FROM gold_line_status` / `v_stage_history`
+by name, **zero changes were needed to the dashboard's dataset SQL or any of
+the 20 Genie per-project views** — they transparently inherit real-time data
+the next time they're queried.
+
+`refresh_silver_gold` still exists, narrowed in scope: it still refreshes
+`live_lines`/`live_projects` as physical tables (via the same MERGE logic as
+before), because `ml_batch_inference` reads those two directly rather than
+through a CDC-computed view — a stable, periodically-refreshed snapshot is
+exactly what batch ML scoring wants (you don't want a model-scoring pass
+recomputing against data that's shifting mid-run), unlike the dashboard.
+Still chained after `simulate_new_data`/`reset_poc`, still manually
+runnable, no schedule.
+
+**Trade-off, stated plainly:** the CDC tables (`lb_*_history`) are
+append-only — every change event ever synced, never compacted — so the
+"latest per PK" window function scans more rows as history accumulates.
+Fine at this PoC's scale (confirmed: sub-3-second query time with ~470
+lines' worth of accumulated CDC history), but a real, long-running
+deployment would eventually want either periodic `VACUUM`/history pruning
+on the CDC tables or a return to a batch-materialized approach at a much
+larger scale. Not a concern for this PoC's lifetime.
+
+**Verified live, end to end, with a real write and no job run in between:**
+advanced a real line via the app; `gold_line_status` still showed the old
+stage 3 seconds later (genuine CDC propagation delay, not zero); re-checked
+a few seconds after that and it was correct; `gold_project_rollup`'s
+`mode_stage` updated correspondingly. Also verified the permission chain
+holds for an identity other than the schema owner — asked BM-L-002's Genie
+agent (a completely independent identity from mine) the same question
+before and after, through the full new chain
+(`vw_genie_bm_l_002_lines` → `gold_line_status` view → `v_lines` CDC view →
+raw `lb_lines_history`) — got the correct, freshly-updated count (5), no
+permission errors. Not independently re-tested: the dashboard's own
+`embed_credentials` service-principal identity specifically (a third,
+different identity from both of the above) — worth a real-browser check,
+though the schema-level grants for the new CDC tables are identical to the
+already-working `historical_*`/old `gold_*` tables', so this is expected to
+work the same way.
+
 ## AppKit app structure
 
 Scaffold: `databricks apps init --name burns-piping-poc --features analytics,lakebase

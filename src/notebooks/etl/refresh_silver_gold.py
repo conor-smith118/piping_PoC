@@ -1,17 +1,31 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Refresh live_* (from Lakebase CDC) and gold_* tables
+# MAGIC # Refresh live_* tables (from Lakebase CDC)
 # MAGIC
 # MAGIC Dedups the `lb_*_history` CDC landing tables (populated by Lakehouse Sync from
 # MAGIC Lakebase) into the `live_*` Delta tables — latest state per primary key,
 # MAGIC ordered by `_pg_lsn`, with deletes actually removed via
-# MAGIC `whenNotMatchedBySourceDelete` — then fully rebuilds the gold layer
-# MAGIC (`gold_line_status`, `gold_project_rollup`) from `v_lines`/`v_stage_history`/
-# MAGIC `v_true_up_records`.
+# MAGIC `whenNotMatchedBySourceDelete`.
 # MAGIC
-# MAGIC Chained after `simulate_new_data` (Phase 8) and safe to run standalone/
-# MAGIC repeatedly — every step here is idempotent (MERGE, CREATE OR REPLACE).
-# MAGIC Historical tables are never read or written by this notebook.
+# MAGIC **No longer rebuilds `gold_line_status`/`gold_project_rollup`** — those are
+# MAGIC now views computed directly from the CDC tables (via `v_lines`/
+# MAGIC `v_stage_history`/`v_true_up_records`/`v_projects` — see
+# MAGIC `src/sql/ddl/03_union_views.sql` and `04_gold_tables.sql`), so the
+# MAGIC dashboard/Genie are always live with no dependency on this (or any) job
+# MAGIC ever running. This job still exists for `live_lines`/`live_projects`,
+# MAGIC which `ml_batch_inference` reads directly rather than through a
+# MAGIC CDC-computed view — a stable, periodically-refreshed snapshot is exactly
+# MAGIC what batch ML scoring wants, unlike the dashboard. See
+# MAGIC ARCHITECTURE.md's "Dashboard freshness: query CDC directly instead of
+# MAGIC waiting on a batch job" for the full reasoning and the live timing
+# MAGIC comparison that motivated this (a real app write landed in
+# MAGIC `lb_lines_history` within the same second either way — the batch
+# MAGIC rebuild's ~90-110s serverless-notebook floor was pure job-trigger latency
+# MAGIC on top of that, not CDC lag).
+# MAGIC
+# MAGIC Chained after `simulate_new_data`/`reset_poc` (Phase 8) and safe to run
+# MAGIC standalone/repeatedly — every step here is idempotent (MERGE). Historical
+# MAGIC tables are never read or written by this notebook.
 
 # COMMAND ----------
 
@@ -33,6 +47,11 @@ from pyspark.sql.window import Window
 CDC_META_COLS = ["_pg_change_type", "_pg_lsn", "_pg_xid", "_timestamp", "_sort_by"]
 
 # (cdc history table, live target table, primary key columns)
+# Kept refreshing all 6, not just live_lines/live_projects (the two
+# ml_batch_inference actually reads directly) — the rest stay genuinely
+# useful as a stable, materialized snapshot for ad-hoc inspection/debugging,
+# separate from the CDC-computed-on-every-query v_* views, and there's no
+# real cost to keeping them fresh too.
 REFRESH_MAP = [
     ("lb_projects_history", "live_projects", ["project_id"]),
     ("lb_lines_history", "live_lines", ["line_id"]),
@@ -46,7 +65,10 @@ REFRESH_MAP = [
 def latest_state(cdc_table: str, pk_cols: list[str]):
     """Current-state dataframe: latest row per PK by _pg_lsn, deletes excluded.
     Mirrors the dedup query in the databricks-lakebase skill's lakehouse-sync
-    reference exactly, just expressed as a DataFrame window instead of SQL."""
+    reference exactly, just expressed as a DataFrame window instead of SQL —
+    and the same logic (expressed as a SQL window function instead) that
+    03_union_views.sql now uses directly, at query time, for the dashboard's
+    sake."""
     df = spark.table(cdc_table).where(
         F.col("_pg_change_type").isin("insert", "update_postimage", "delete")
     )
@@ -74,92 +96,3 @@ def refresh_live_table(cdc_table: str, live_table: str, pk_cols: list[str]):
 
 for cdc_table, live_table, pk_cols in REFRESH_MAP:
     refresh_live_table(cdc_table, live_table, pk_cols)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Rebuild gold_line_status
-# MAGIC One row per line: `v_lines` + latest `v_stage_history` event + true-up
-# MAGIC variance summary (preliminary and final, whichever exist so far).
-
-# COMMAND ----------
-
-spark.sql(f"""
-CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.gold_line_status AS
-WITH latest_event AS (
-  SELECT *
-  FROM (
-    SELECT sh.*, ROW_NUMBER() OVER (PARTITION BY sh.line_id ORDER BY sh.stage_number DESC) AS rn
-    FROM {CATALOG}.{SCHEMA}.v_stage_history sh
-  )
-  WHERE rn = 1
-),
-prelim_tu AS (
-  SELECT line_id, length_variance_pct AS prelim_length_variance_pct
-  FROM {CATALOG}.{SCHEMA}.v_true_up_records WHERE true_up_type = 'PRELIMINARY'
-),
-final_tu AS (
-  SELECT line_id, length_variance_pct AS final_length_variance_pct
-  FROM {CATALOG}.{SCHEMA}.v_true_up_records WHERE true_up_type = 'FINAL'
-)
-SELECT
-  l.line_id, l.project_id, l.line_no, l.service, l.line_class_spec, l.nominal_size_in,
-  l.material, l.estimated_centerline_length_ft, l.current_stage,
-  CASE l.current_stage
-    WHEN 1 THEN 'Initial Data Entry' WHEN 2 THEN 'Initial Engineer Confirmation'
-    WHEN 3 THEN 'Preliminary True-Up Complete' WHEN 4 THEN 'Engineer Prelim True-Up Confirmation'
-    WHEN 5 THEN 'Final True-Up Complete' WHEN 6 THEN 'Engineer Final Confirmation'
-  END AS current_stage_name,
-  l.is_complete,
-  e.event_type AS latest_event_type, e.actor_email AS latest_event_actor_email,
-  e.actor_role AS latest_event_actor_role, e.event_timestamp AS latest_event_timestamp,
-  p.prelim_length_variance_pct, f.final_length_variance_pct,
-  l.data_origin
-FROM {CATALOG}.{SCHEMA}.v_lines l
-LEFT JOIN latest_event e ON e.line_id = l.line_id
-LEFT JOIN prelim_tu p ON p.line_id = l.line_id
-LEFT JOIN final_tu f ON f.line_id = l.line_id
-""")
-print(f"gold_line_status: {spark.table(f'{CATALOG}.{SCHEMA}.gold_line_status').count()} rows")
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Rebuild gold_project_rollup
-# MAGIC Mode/min stage among **incomplete** lines only (see ARCHITECTURE.md rollup
-# MAGIC design) — projects with zero incomplete lines default to stage 6.
-
-# COMMAND ----------
-
-spark.sql(f"""
-CREATE OR REPLACE TABLE {CATALOG}.{SCHEMA}.gold_project_rollup AS
-WITH counts AS (
-  SELECT project_id, COUNT(*) AS total_lines, COUNT(*) FILTER (WHERE is_complete) AS lines_complete
-  FROM {CATALOG}.{SCHEMA}.gold_line_status
-  GROUP BY project_id
-),
-stage_stats AS (
-  -- Spark SQL's mode() is a plain aggregate (no Postgres-style
-  -- WITHIN GROUP (ORDER BY ...) needed) — confirmed directly against this
-  -- warehouse before relying on it here.
-  SELECT project_id,
-         MODE(current_stage) AS mode_stage,
-         MIN(current_stage) AS min_stage,
-         AVG(DATEDIFF(CURRENT_TIMESTAMP(), latest_event_timestamp)) AS avg_days_in_current_stage
-  FROM {CATALOG}.{SCHEMA}.gold_line_status
-  WHERE NOT is_complete
-  GROUP BY project_id
-)
-SELECT
-  p.project_id, p.project_name, p.client_name,
-  c.total_lines, c.lines_complete,
-  CAST(c.lines_complete AS DOUBLE) / c.total_lines AS pct_lines_complete,
-  COALESCE(s.mode_stage, 6) AS mode_stage,
-  COALESCE(s.min_stage, 6) AS min_stage,
-  COALESCE(s.avg_days_in_current_stage, 0.0) AS avg_days_in_current_stage,
-  p.data_origin
-FROM {CATALOG}.{SCHEMA}.v_projects p
-JOIN counts c ON c.project_id = p.project_id
-LEFT JOIN stage_stats s ON s.project_id = p.project_id
-""")
-print(f"gold_project_rollup: {spark.table(f'{CATALOG}.{SCHEMA}.gold_project_rollup').count()} rows")

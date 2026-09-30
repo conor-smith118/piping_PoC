@@ -241,9 +241,45 @@ this repo references.
       client-side display bug, confirmed by the fact that it failed safely
       (a confusing 403) rather than letting the wrong role actually act.
       Full trail in `ARCHITECTURE.md`.
+- [x] Phase 15 — fixed the dashboard not updating after real app usage.
+      Root-caused with a live timed test (not a guess): CDC itself lands a
+      write within the same second, but `refresh_silver_gold` — the job
+      that used to rebuild `gold_line_status`/`gold_project_rollup` as
+      physical tables — was never chained to anything for direct app
+      writes (only to `simulate_new_data`/`reset_poc`), and its own
+      execution floor is ~90-110s regardless of trigger (serverless
+      cold-start, confirmed from 5 real runs) — so a schedule or an
+      app-triggered run would each still leave the dashboard stale for
+      close to that long. Instead: `gold_line_status`/`gold_project_rollup`
+      are now **views**, computed directly from the CDC tables (via
+      `v_lines`/`v_stage_history`/`v_true_up_records`/`v_projects`, which
+      now compute their live half from `lb_*_history` at query time rather
+      than from a batch-refreshed table) — zero dashboard/Genie changes
+      needed, since they already just reference these by name.
+      `refresh_silver_gold` still exists, narrowed to just
+      `live_lines`/`live_projects` for `ml_batch_inference`'s sake. **Trade-off**:
+      the CDC tables are append-only and grow unbounded, so this query gets
+      slower over time — fine at this PoC's scale (sub-3s), a real
+      long-running deployment would eventually want CDC history pruning.
+      **Verified live end-to-end:** a real write showed up in
+      `gold_line_status`/`gold_project_rollup` within a few seconds with
+      *zero* job runs; independently confirmed the permission chain holds
+      for a non-owner identity by asking a project's Genie agent the same
+      question before/after and getting the correct, freshly-updated
+      answer through the full new view chain. Full trail in
+      `ARCHITECTURE.md`'s "Dashboard freshness: query CDC directly instead
+      of waiting on a batch job".
 
 ## Known follow-ups (need your real browser, not just my CLI access)
 
+0. **Confirm the dashboard now updates live in your own browser.** Move a
+   line through a stage in the app, then switch to that project's dashboard
+   tab and refresh — should reflect the change within a few seconds, no job
+   run needed. Verified via direct query and independently via Genie (a
+   different identity), but not yet via the dashboard's own
+   `embed_credentials` service-principal identity specifically — expected
+   to work identically (same grants profile as the already-working
+   tables), but a real check closes the loop.
 1. **Embedding domain allowlist.** If a dashboard iframe renders
    blank/blocked instead of the dashboard, a workspace admin needs to allow
    this app's domain — open any dashboard's **Share → Embed dashboard**
