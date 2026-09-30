@@ -1,858 +1,306 @@
-# Burns & McDonnell Piping Workflow PoC — Build Plan
+# Burns & McDonnell Piping Workflow PoC — Architecture
 
-## Context
+## Overview
 
-Burns & McDonnell (EPC) needs a PoC Databricks App to demonstrate a piping-design
-approval workflow: an Estimator enters line-list data, a Lead Engineer confirms it,
-routing happens externally (S3D-style 3D design), a Design Lead trues-up the routed
-quantities against the estimate, and the Lead Engineer confirms the true-up — twice
-(preliminary and final). The PoC must show this as a real, usable app (not a mockup):
-role-gated actions, a live project timeline/Kanban, an embedded dashboard, human input
-flowing through a real CDC pipeline into the lakehouse, a trained ML model predicting
-stage durations, and a curated Genie agent per project. It also needs to be demoable
-repeatedly (simulate new data, reset to a clean state) and handed off via a real repo.
+This PoC models an EPC piping-design approval workflow as a real, usable
+Databricks App: an Estimator enters line-list data, a Lead Engineer confirms
+it, routing happens externally (S3D-style 3D design), a Design Lead trues-up
+the routed quantities against the estimate, and the Lead Engineer confirms
+the true-up — twice (preliminary and final). Every human write goes through
+Lakebase Postgres and replicates into Unity Catalog via CDC in real time,
+feeding an always-live AI/BI dashboard, a curated Genie agent, and an ML model
+predicting stage durations — all scoped per project.
 
-This is a from-scratch build — the target repo (`conor-smith118/piping_PoC`) is empty,
-and no PoC infrastructure exists yet in the workspace. All product/architecture
-decisions below were confirmed directly with the stakeholder across two rounds of
-clarifying questions; this plan is the concrete implementation of those decisions,
-firmed up against the actual `databricks-dabs`, `databricks-lakebase`,
-`databricks-genie-agents`, and `databricks-aibi-dashboards` skill references and
-against live workspace recon (not guessed from memory).
-
-## Fixed naming / environment
+## Environment
 
 | Item | Value |
 |---|---|
-| Databricks profile | `fevm-css-demo` (re-authenticated, confirmed working) |
-| UC catalog.schema | `css_fevm.burns_piping_poc` (new schema in existing shared sandbox catalog) |
-| Lakebase project | new dedicated project `burns-piping-poc` (not reusing any of the 8 existing unrelated projects) |
-| SQL Warehouse | `cssSQL` — **re-resolve its `warehouse_id` via `databricks warehouses list` at build time**, don't hardcode |
-| App name | `burns-piping-poc` |
-| DABs bundle name | `burns_piping_poc` |
-| GitHub repo | `conor-smith118/piping_PoC` (empty, ADMIN access, `gh` authenticated) |
-| Role groups | `Estimator Piping`, `Lead Engineer Piping`, `Design Lead Piping`, `Admin Piping` — **account-level** groups, migrated from an initial workspace-local design (see "Auth design" below, "Workspace-local -> account-level group migration"). The in-app role label/value stays "Estimator"/"Lead Engineer"/"Design Lead"/"Admin" regardless — only the underlying group objects are named differently. |
+| Databricks profile | `fevm-css-demo` |
+| UC catalog.schema | `css_fevm.burns_piping_poc` |
+| Lakebase project | `burns-piping-poc` (branch `production`, database `databricks-postgres`) |
+| SQL Warehouse | `cssSQL` (`a4e59a1f13ab8b9a`) |
+| App | `burns-piping-poc`, bundle name `burns_piping_poc` |
+| Account-level groups | `Estimator Piping`, `Lead Engineer Piping`, `Design Lead Piping`, `Admin Piping` — in-app role labels drop the suffix ("Estimator", "Lead Engineer", "Design Lead", "Admin") |
+| Live projects | `BM-L-001` .. `BM-L-005` |
 
-**Key structural decision:** Lakebase holds **only live-project data**. The 20-30
-synthetic historical closed projects are generated directly into their own Delta
-tables (same column shape as the live tables) and never touch Lakebase or CDC. A
-union view reconciles the two for ML/dashboard/Genie consumption. This keeps
-"reset"/"simulate" jobs structurally incapable of touching the training corpus, and
-keeps the CDC surface limited to the 5 live projects.
+**Key structural decision:** Lakebase holds *only* live-project data. The 25
+synthetic historical closed projects live directly in their own Delta tables
+(same column shape as the live tables) and never touch Lakebase or CDC. This
+keeps `simulate_new_data`/`reset_poc` structurally incapable of touching the
+ML training corpus, and keeps the CDC surface limited to the 5 live projects.
 
-## Repo structure (DABs monorepo)
+## Repo structure
 
 ```
 piping_PoC/
 ├── databricks.yml
 ├── resources/
-│   ├── schema.burns_piping_poc.yml          # UC schema (resources.Schema)
-│   ├── postgres_project.burns_piping_poc.yml # Lakebase project+branch+database (resources.Postgres*)
-│   ├── app.burns_piping_poc.yml
-│   ├── jobs.synthetic_historical_seed.yml   # one-time: 20-30 closed projects -> Delta
-│   ├── jobs.live_seed.yml                   # one-time: seed 5 live projects into Lakebase
-│   ├── jobs.refresh_silver_gold.yml         # CDC history -> live_* -> gold_* (manual + chainable)
-│   ├── jobs.simulate_new_data.yml           # manual-trigger only, no schedule block
-│   ├── jobs.reset_poc.yml                   # manual-trigger only
-│   ├── jobs.ml_train_stage_duration.yml     # manual-trigger, occasional retrain
+│   ├── schema.burns_piping_poc.yml          # UC schema
+│   ├── app.burns_piping_poc.yml             # Databricks App + its resource bindings
+│   ├── jobs.synthetic_historical_seed.yml   # one-time: 25 closed projects -> Delta
+│   ├── jobs.refresh_silver_gold.yml         # live_lines/live_projects refresh (for ML; see "Data freshness")
+│   ├── jobs.simulate_new_data.yml           # manual-trigger demo data generator
+│   ├── jobs.reset_poc.yml                   # manual-trigger baseline restore
+│   ├── jobs.ml_train_stage_duration.yml
 │   ├── jobs.ml_batch_inference.yml
-│   ├── dashboards.project_progress.yml
-│   └── genie_spaces/
-│       └── <project_id>.genie-space.yml     # one resource per live project (x5)
+│   ├── dashboards/<project>.dashboard.yml   # one per live project (x5)
+│   └── genie_spaces/<project>.genie-space.yml  # one per live project (x5)
 ├── src/
-│   ├── app/                    # `databricks apps init` output
+│   ├── app/                        # AppKit (Node/TypeScript/React)
 │   │   ├── app.yaml
-│   │   ├── client/src/{App.tsx,pages/,components/}
-│   │   ├── server/server.ts    # getEffectiveRole() + 6 stage-action write routes
-│   │   └── config/queries/*.sql
-│   ├── dashboards/project_progress.lvdash.json
+│   │   ├── client/src/{App.tsx, pages/, components/, lib/}
+│   │   └── server/{server.ts, lib/{auth,roles,db}.ts, routes/*.ts}
+│   ├── dashboards/
+│   │   ├── build_dashboard_config.py       # generates the 5 .lvdash.json below
+│   │   └── project_progress_<project>.lvdash.json
+│   ├── genie/
+│   │   ├── build_agent_config.py           # generates the 5 .geniespace.json below
+│   │   └── <project>.geniespace.json
 │   ├── sql/
-│   │   ├── ddl/00_tables.sql ... 06_genie_project_views.sql   # schema itself is a bundle resource now
-│   │   └── lakebase/00_schema.sql
-│   ├── notebooks/
-│   │   ├── setup/01_create_cdf_config.py    # verifies REPLICA IDENTITY FULL on all 6 tables, then enables CDF sync (no bundle resource type for this)
-│   │   ├── synthetic/{generate_historical_projects,generate_live_seed}.py
-│   │   ├── etl/refresh_silver_gold.py
-│   │   ├── simulate/simulate_new_data.py
-│   │   ├── reset/reset_poc.py
-│   │   └── ml/{train_stage_duration_model,batch_score_predictions}.py
-│   └── genie/
-│       └── <project_id>.geniespace.json     # serialized_space per project, referenced via file_path
-├── docs/{ARCHITECTURE.md,DEMO_SCRIPT.md}
+│   │   ├── ddl/01-05_*.sql                 # live/historical/union-views/gold/genie-views
+│   │   └── lakebase/{00_schema, 01_grant_app_access, seed_live_data}.sql
+│   └── notebooks/
+│       ├── synthetic/{generate_historical_projects, generate_live_seed}.py
+│       ├── etl/refresh_silver_gold.py
+│       ├── simulate/simulate_new_data.py
+│       ├── reset/reset_poc.py
+│       └── ml/{train_stage_duration_model, batch_score_predictions}.py
+├── docs/{ARCHITECTURE.md, DEMO_SCRIPT.md}
 └── README.md
 ```
 
-**Confirmed directly against this environment's installed CLI (v1.17.0,
-`databricks bundle schema`)** — DABs supports far more than assumed in the first
-pass of this plan: `dashboards`, `jobs`, `apps`, `registered_models`, `volumes`,
-**`schemas`** (UC schema as code — `catalog_name`/`name`/`comment`/`grants`), and
-the full Lakebase hierarchy **`postgres_projects`/`postgres_branches`/
-`postgres_databases`/`postgres_synced_tables`**, and — contrary to what this plan
-originally claimed — **`genie_spaces`** too (`title`, `description`,
-`warehouse_id`, `parent_path`, `permissions`, and either an inline `serialized_space`
-or a `file_path` to a `.geniespace.json` file; round-trip an existing space with
-`databricks bundle generate genie-space`). All of these are now declared as bundle
-resources rather than imperative setup scripts, so `bundle deploy` alone stands up
-the schema, the Lakebase project, and all 5 Genie agents — only workspace groups and
-the Lakehouse Sync CDF config have no bundle resource type and stay as one-time CLI
-steps in `notebooks/setup/`.
+## Data architecture
 
-**Verify at build time:** exact bundle YAML for each of these resources against
-`bundle validate --strict` (field names above are taken from the live schema, but
-confirm nested shapes like `default_endpoint_settings` and `new_pipeline_spec`
-before relying on them); whether `databricks apps init --features
-analytics,lakebase` scaffolds cleanly into `src/app/` or needs relocating.
+### Unity Catalog layers
 
-## Unity Catalog schema (`css_fevm.burns_piping_poc`)
+| Layer | Tables/views | Nature |
+|---|---|---|
+| Live | `live_projects`, `live_lines`, `live_stage_history`, `live_true_up_records`, `live_change_log`, `live_user_project_role` | Physical Delta tables, refreshed from Lakebase CDC by `refresh_silver_gold` |
+| Historical | `historical_projects`, `historical_lines`, `historical_stage_history`, `historical_true_up_records`, `historical_change_log` | Static synthetic data (25 closed projects), written once |
+| Union | `v_projects`, `v_lines`, `v_stage_history`, `v_true_up_records`, `v_change_log` | Views unioning live + historical with a `data_origin` column — see "Data freshness" below for how the live half is actually computed |
+| Gold | `gold_line_status`, `gold_project_rollup` | Views over the union views — see "Data freshness" |
+| ML | `ml_stage_transition_features`, `gold_ml_predictions` | Physical Delta tables, batch-built by the ML notebooks |
 
-**Live vs. historical, physically separate, unioned by view:**
+**Column-level grain** (real S3D/P&ID/line-list vocabulary, not generic
+placeholders):
 
-| Live (CDC + merge job) | Historical (written once, static) |
-|---|---|
-| `live_projects` | `historical_projects` |
-| `live_lines` | `historical_lines` |
-| `live_stage_history` | `historical_stage_history` |
-| `live_true_up_records` | `historical_true_up_records` |
-| `live_change_log` | `historical_change_log` |
-
-`v_projects` / `v_lines` / `v_stage_history` / `v_true_up_records` / `v_change_log`
-are `UNION ALL` views over each pair, adding a literal `data_origin` column
-(`LIVE` / `SYNTHETIC_HISTORICAL`). `live_user_project_role` has no historical
-counterpart (synthetic projects have no interactive role assignments).
-
-**CDC landing tables** (auto-created by Lakehouse Sync once enabled — see "Lakebase
-→ Delta CDC" below): `lb_projects_history`, `lb_lines_history`,
-`lb_user_project_role_history`, `lb_stage_events_history`,
-`lb_true_up_records_history`, `lb_change_log_history` — each carrying
-`_pg_change_type`, `_pg_lsn`, `_pg_xid`, `_timestamp`, `_sort_by`.
-`refresh_silver_gold.py` dedups these (latest `_pg_lsn` per PK, excluding deletes)
-into the `live_*` tables via MERGE.
-
-**Column-level grain:**
-
-- **`*_projects`** (1 row/project): `project_id` (PK), `project_name`, `client_name`,
-  `site_location`, `project_type`, `status` (`ACTIVE`/`CLOSED`), `target_line_count`,
-  `created_at`, `closed_at`.
-- **`*_lines`** (1 row/piping line, current snapshot): `line_id` (PK), `project_id`
-  (FK), `line_no` (e.g. `L-001`), `service`, `origin_tag`, `destination_tag`,
-  `area_package_zone`, `line_class_spec`, `nominal_size_in`, `schedule_thickness`,
-  `material`, `design_pressure_psig`, `design_temperature_f`,
-  `operating_pressure_psig`, `operating_temperature_f`, `corrosion_allowance_in`,
-  `insulation_type`, `insulation_thickness_in`, `heat_tracing_flag`,
-  `heat_tracing_spec`, `end_connections`, `flange_rating`, `pid_reference`,
-  `isometric_drawing_no`, `estimated_centerline_length_ft`, `special_notes`,
-  `current_stage` (1-6, denormalized), `is_complete`, `created_by`, `created_at`,
-  `updated_at`. (Field list from real S3D/line-list research, not generic
-  placeholders.)
-- **`*_stage_history`** (append-only event log — the audit/confirmation trail):
-  `event_id` (PK), `line_id`, `project_id`, `stage_number` (1-6), `stage_name`,
-  `event_type` (one of the 6 canonical actions), `actor_email`, `actor_role`,
-  `event_timestamp`, `notes`.
-- **`*_true_up_records`** (1 row per line per true-up round, max 2/line —
-  `PRELIMINARY`/`FINAL`): `true_up_id` (PK), `line_id`, `project_id`, `true_up_type`,
+- **`*_projects`** (1 row/project): `project_id`, `project_name`,
+  `client_name`, `site_location`, `project_type`, `status`,
+  `target_line_count`, `created_at`, `closed_at`.
+- **`*_lines`** (1 row/line, current snapshot): `line_id`, `project_id`,
+  `line_no`, `service`, `origin_tag`, `destination_tag`,
+  `area_package_zone`, `line_class_spec`, `nominal_size_in`,
+  `schedule_thickness`, `material`, `design_pressure_psig`,
+  `design_temperature_f`, `operating_pressure_psig`,
+  `operating_temperature_f`, `corrosion_allowance_in`, `insulation_type`,
+  `insulation_thickness_in`, `heat_tracing_flag`, `heat_tracing_spec`,
+  `end_connections`, `flange_rating`, `pid_reference`,
+  `isometric_drawing_no`, `estimated_centerline_length_ft`,
+  `special_notes`, `current_stage` (1-6), `is_complete`, `created_by`,
+  `created_at`, `updated_at`.
+- **`*_stage_history`** (append-only audit trail): `event_id`, `line_id`,
+  `project_id`, `stage_number`, `stage_name`, `event_type`, `actor_email`,
+  `actor_role`, `event_timestamp`, `notes`.
+- **`*_true_up_records`** (≤2 rows/line — `PRELIMINARY`/`FINAL`):
+  `true_up_id`, `line_id`, `project_id`, `true_up_type`,
   `estimated_centerline_length_ft`, `actual_centerline_length_ft`,
-  `length_variance_pct`, `fitting_detail` (JSON `[{type,size,estimated_qty,actual_qty}]`),
-  `valve_detail` (same shape), `support_detail` (same shape),
-  `weld_count_estimated/actual`, `flange_count_estimated/actual`,
-  `mto_weight_estimated_lb/actual_lb`, `mto_cost_estimated_usd/actual_usd`,
-  `isometric_drawing_ref`, `pid_ref`, `performed_by`, `performed_at`, `confirmed_by`,
-  `confirmed_at`.
-- **`*_change_log`** (0..N rows per true-up): `change_id` (PK), `true_up_id` (FK),
+  `length_variance_pct`, `fitting_detail`/`valve_detail`/`support_detail`
+  (JSON `[{type,size,estimated_qty,actual_qty}]`), weld/flange counts, MTO
+  weight/cost estimated+actual, isometric/P&ID refs, `performed_by`,
+  `performed_at`, `confirmed_by`, `confirmed_at`.
+- **`*_change_log`** (0..N rows/true-up): `change_id`, `true_up_id`,
   `line_id`, `reason_category` (`DESIGN_CHANGE`/`CONSTRUCTABILITY`/
   `ESTIMATING_ERROR`/`OTHER`), `reason_text`, `changed_by`, `changed_at`.
-- **`live_user_project_role`** (1 row per user×project, CDC'd from Lakebase):
-  `user_email`, `project_id`, `role`, `assigned_by`, `assigned_at`.
+- **`live_user_project_role`** (1 row/user×project): `user_email`,
+  `project_id`, `role`, `assigned_by`, `assigned_at`.
 
 **Gold layer:**
-- **`gold_line_status`** — `v_lines` + latest `v_stage_history` row + true-up
-  variance summary. Feeds the Kanban board.
-- **`gold_project_rollup`** — per-project stage histogram, `mode_stage` (most common
-  stage among incomplete lines — the headline timeline marker), `min_stage` (the
-  laggard, shown as a secondary stat), `pct_lines_complete`,
-  `avg_days_in_current_stage`, `total_lines`, `data_origin`. Always computed live as
-  an aggregate over `gold_line_status`, never hand-maintained.
-- **`ml_stage_transition_features`** / **`gold_ml_predictions`** — see ML section.
+- **`gold_line_status`** — one row per line: line record + latest stage-history
+  event + true-up variance summary. Feeds the Kanban board and dashboard.
+- **`gold_project_rollup`** — one row per project: `mode_stage` (most common
+  stage among incomplete lines — the timeline's headline marker), `min_stage`
+  (the laggard), `pct_lines_complete`, `avg_days_in_current_stage`,
+  `total_lines`.
 
-## Lakebase Postgres schema
+### Lakebase Postgres schema
 
-Same 6 tables (`projects`, `user_project_role`, `lines`, `stage_events`,
-`true_up_records`, `change_log`) in the `production` branch's `databricks_postgres`
-database, `public` schema, mirroring the live-Delta column shape.
-`lines.current_stage` is a denormalized column the app must update in the **same
-transaction** as any `stage_events` insert that advances a line (fast Kanban reads
-without a join, at the cost of requiring write discipline — every stage-advancing
-route does both writes atomically).
+Six tables in the `production` branch's `databricks_postgres` database,
+`public` schema, mirroring the live-Delta column shape: `projects`,
+`user_project_role`, `lines`, `stage_events`, `true_up_records`,
+`change_log`. `lines.current_stage` is denormalized, updated in the same
+transaction as the `stage_events` insert that advances it. Every table has
+`REPLICA IDENTITY FULL` set at creation (`src/sql/lakebase/00_schema.sql`) —
+required for CDC.
 
-**`REPLICA IDENTITY FULL` is set as part of table creation itself, not a separate
-step to remember later** — `src/sql/lakebase/00_schema.sql` pairs every
-`CREATE TABLE` with its `ALTER TABLE ... REPLICA IDENTITY FULL;` immediately below
-it, for all 6 tables, e.g.:
-
-```sql
-CREATE TABLE lines ( ... );
-ALTER TABLE lines REPLICA IDENTITY FULL;
-
-CREATE TABLE stage_events ( ... );
-ALTER TABLE stage_events REPLICA IDENTITY FULL;
--- ... repeated for projects, user_project_role, true_up_records, change_log
-```
-
-This file is the single source of truth for the Lakebase schema (run once against
-the new project/branch at Phase 0) — no table is ever created without its replica
-identity set in the same script, so CDC can't silently be enabled against a table
-that isn't ready for it.
-
-**Mapping the 6 stage actions to exact writes** (all server-side, one transaction
-each, via AppKit's Lakebase pool):
+**The 6 stage actions, exactly what each writes:**
 
 | # | Action | Actor | Writes |
 |---|---|---|---|
-| 1 | Initial Data Entry | Estimator | `INSERT lines` (full line-list record) + `INSERT stage_events` (stage 1) |
-| 2 | Initial Engineer Confirmation | Lead Engineer | `INSERT stage_events` (stage 2) [+ optional `UPDATE lines` on correction] |
-| 3 | Preliminary True-Up Complete | Design Lead | `INSERT true_up_records` (PRELIMINARY) + `INSERT change_log` (0..N) + `INSERT stage_events` (stage 3) |
-| 4 | Engineer Prelim True-Up Confirmation | Lead Engineer | `UPDATE true_up_records` (confirm PRELIMINARY) + `INSERT stage_events` (stage 4) |
-| 5 | Final True-Up Complete | Design Lead | `INSERT true_up_records` (FINAL) + `INSERT change_log` + `INSERT stage_events` (stage 5) |
-| 6 | Engineer Final Confirmation | Lead Engineer | `UPDATE true_up_records` (confirm FINAL) + `UPDATE lines SET is_complete=true` + `INSERT stage_events` (stage 6) |
+| 1 | Initial Data Entry | Estimator | `INSERT lines` + `INSERT stage_events` (1). Editable/deletable by the Estimator until stage 2. |
+| 2 | Initial Engineer Confirmation | Lead Engineer | `INSERT stage_events` (2) |
+| 3 | Preliminary True-Up Complete | Design Lead | `INSERT true_up_records` (PRELIMINARY) + `INSERT change_log` (0..N) + `INSERT stage_events` (3) |
+| 4 | Engineer Prelim True-Up Confirmation | Lead Engineer | `UPDATE true_up_records` (confirm) + `INSERT stage_events` (4) |
+| 5 | Final True-Up Complete | Design Lead | `INSERT true_up_records` (FINAL) + `INSERT change_log` + `INSERT stage_events` (5) |
+| 6 | Engineer Final Confirmation | Lead Engineer | `UPDATE true_up_records` (confirm) + `UPDATE lines SET is_complete=true` + `INSERT stage_events` (6) |
 
-### Estimator self-service edit/delete (stage 1 only)
+### Lakebase → Delta CDC (Lakehouse Sync)
 
-Not in the original 6-action table above — added after real usage surfaced a
-gap: an Estimator who made a data-entry mistake had no way to fix or remove
-it before the Lead Engineer even looked at it. `PUT` / `DELETE
-/api/lines/:lineId` (`server/routes/lines.ts`), gated to `requireRole(...,
-['Estimator'])` **and** `current_stage === 1`, checked in that order (role,
-then stage) so a wrong-role attempt always 403s before a right-role,
-wrong-stage attempt ever reaches the 409.
+Lakehouse Sync (`databricks postgres create-cdf-config`) replicates every
+row-level change from the 6 Postgres tables into Delta CDC landing tables —
+`lb_<table>_history`, each carrying `_pg_change_type`, `_pg_lsn`, `_pg_xid`,
+`_timestamp`, `_sort_by`. This lands within a couple of seconds of the
+Postgres write (measured directly, not assumed).
 
-Stage 1 only, deliberately, not "any stage the Estimator can still see": once
-the Lead Engineer confirms Initial Data Entry (stage ≥ 2), that confirmation
-means "I reviewed and approved this exact data" — silently changing it out
-from under that confirmation afterward would invalidate it without
-re-triggering review. A correction after that point is the Lead Engineer's
-own "optional `UPDATE lines` on correction" from the table above (row 2), not
-an Estimator self-service edit — not built, intentionally out of scope here.
+### Data freshness: the dashboard and Genie are always live
 
-Edit is a plain `UPDATE`, no new `stage_events` row — correcting an
-unconfirmed line is not a new stage action, so the audit trail still shows
-exactly one "Initial Data Entry" event at its original timestamp. Delete
-removes the line's one `stage_events` row before the line itself (satisfies
-the FK; stage 1 is the only stage where no `true_up_records`/`change_log`
-rows can exist yet, so nothing else needs cleanup).
+`v_projects`/`v_lines`/`v_stage_history`/`v_true_up_records`/`v_change_log`
+compute their **live half directly from the `lb_*_history` CDC tables**, at
+query time — a `ROW_NUMBER() OVER (PARTITION BY <pk> ORDER BY _pg_lsn DESC)`
+window keeping only each primary key's latest non-deleted state, unioned with
+the static historical tables. `gold_line_status`/`gold_project_rollup` are
+views built on top of those — not physical tables. Since the dashboard's
+dataset SQL and every Genie per-project view already just say `SELECT ...
+FROM gold_line_status`/`v_stage_history` by name, both are always live with
+no batch job in their path at all: a write lands in the CDC tables within
+seconds, and the very next query against the dashboard or a Genie agent sees
+it.
 
-**Verified live**, all 4 cases: full create→edit→delete round trip as
-Estimator (200/204, edit visible on re-fetch, 404 after delete); a
-Lead-Engineer-confirmed (stage 2) line correctly 409s on both edit and
-delete attempts; a wrong-role (Lead Engineer) delete attempt on a stage-1
-line correctly 403s ahead of any stage check.
+`refresh_silver_gold` still exists and still runs (manual, or chained after
+`simulate_new_data`/`reset_poc`) — narrowed in scope to just
+`live_lines`/`live_projects`, which `ml_batch_inference` reads directly as
+physical tables rather than through a CDC-computed view. A stable,
+periodically-refreshed snapshot is the right thing for batch ML scoring
+(you don't want a scoring pass recomputing against data shifting mid-run);
+it is not the right thing for a dashboard, which is why the two paths are
+architecturally different. This is also why `gold_ml_predictions`
+(ML-predicted ETAs) does *not* share the dashboard's always-live property —
+see the README's "Known limitations".
 
-### Client-side "who acts next" bug (STAGE_ROLE was inverted)
+**Trade-off:** the CDC tables are append-only and never pruned, so the
+"latest per PK" computation scans more rows as history accumulates. Fine at
+this PoC's scale (sub-3-second query time); a real long-running deployment
+would eventually want periodic CDC history pruning.
 
-Found immediately after shipping the above: an Estimator clicking "Confirm
-Initial Data Entry" on their own just-created line got
-`This action requires role Lead Engineer; you are Estimator on this
-project.` — a correct 403 from the server (its role gate was never wrong),
-but the button should never have been shown to the Estimator at all.
+## Application (AppKit / Node / React)
 
-Root cause: `LineDetailPanel.tsx`'s local `STAGE_ROLE` map (used only for
-client-side "can I act on this / who am I waiting on" display, entirely
-separate from the real server-side gate on each route) was defined as
-"stage N → the role whose action **produced** stage N" (`{1: 'Estimator',
-2: 'Lead Engineer', ...}`) — correct-sounding, but the wrong question. The
-component actually needs "given a line **currently sitting** at stage N,
-which role acts **next**": stage 1 → Lead Engineer (who performs Initial
-Engineer Confirmation), not Estimator (who already acted to create it).
-Every entry was off by exactly this one-stage shift. Fixed to
-`{1: 'Lead Engineer', 2: 'Design Lead', 3: 'Lead Engineer', 4: 'Design
-Lead', 5: 'Lead Engineer'}` (no stage-6 entry — `is_complete` is already
-true by the time a line reaches stage 6). Also fixed the identically-wrong,
-currently-unused `STAGE_ROLE` export in `server/lib/roles.ts` for the same
-reason — not a live bug (nothing consumes it — every route hardcodes its
-own required role directly), but left correct rather than deleted so it
-isn't a trap if something starts using it later.
+### Pages
 
-Confirms the defense-in-depth from Phase 2-3 did its job here: a real UI
-bug produced a correct-but-confusing 403 instead of ever letting the wrong
-role actually advance a stage.
+- **`/`** — Project picker. Lists only projects the caller has a currently
+  eligible role on (or all 5, if Admin-eligible); shows the signed-in
+  identity and eligible-role badges.
+- **`/projects/:projectId`** — 6-stage timeline, role badge with bounded
+  "view as" switcher (Admin-eligible only), a Project Insights card (tabbed
+  dashboard embed with its own native "Ask Genie" button), Kanban board.
+- **`/projects/:projectId/lines/:lineId`** — Line detail slide-over: full
+  record, stage history, true-up baseline-vs-actual, the one action button
+  for whatever stage the line is at (rendered only if the effective role
+  matches), Edit/Delete for the Estimator on a not-yet-confirmed line.
+- **`/admin`** — Admin-only: assign/revoke per-project role assignments; a
+  static role↔group reference. No project create/edit (see README).
 
-## Lakebase → Delta CDC ("Lakehouse Sync", Beta — confirmed mechanism)
+### Authorization
 
-This is the **opposite direction** from Lakebase "synced tables" (Delta→Postgres).
-Confirmed via `databricks-lakebase`'s `lakehouse-sync.md`. `01_create_cdf_config.py`
-does this in two steps, in order — **it verifies replica identity before turning
-sync on, rather than assuming `00_schema.sql` was run correctly**:
+`getEffectiveRole(user, projectId, session)` (`server/lib/roles.ts`) is the
+single function backing both UI gating and every write route's server-side
+check:
 
-1. **Verify** every one of the 6 tables in `public` actually has `relreplident =
-   'f'` (full) — the same check query from the skill's reference doc — and fails
-   loudly (naming the offending table) rather than proceeding if any table doesn't:
+1. Resolve the caller's real group memberships via the OBO-authenticated
+   SCIM `Me` call (`server/lib/auth.ts`), narrowed to a single role if the
+   forwarded access token carries an `ag` (assumed group) claim — see
+   "Account-level RBAC" below.
+2. Look up `user_project_role` for `(user, projectId)`; honor it only if
+   that role is also currently eligible (a defensive re-check: revoking
+   group membership immediately invalidates a stale assignment).
+3. If a "view as" override is set and is one of the eligible roles, return
+   that instead.
+4. Admins get access to any project even with no explicit assignment row.
 
-   ```sql
-   SELECT c.relname AS table_name,
-          CASE c.relreplident WHEN 'f' THEN 'full' ELSE 'NOT FULL' END AS replica_identity
-   FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-   WHERE c.relkind = 'r' AND n.nspname = 'public';
-   ```
+**Reconciliation rule:** group membership = coarse eligibility ("which roles
+can this person ever hold"); `user_project_role` = the actual per-project
+assignment. `/admin` writes intent; `getEffectiveRole` is the only place
+enforcement actually happens — an assignment for a role the target user
+isn't group-eligible for simply has no effect, rather than being validated
+(or not) at write time.
 
-2. **Enable sync**, only once step 1 passes for all 6 tables:
+**"View as" — bounded, not a superuser bypass:** visible only to
+Admin-eligible users; only ever offers roles the caller is actually
+group-eligible for.
 
-   ```bash
-   databricks postgres create-cdf-config \
-     projects/<PROJECT_ID>/branches/<BRANCH_ID>/databases/<DATABASE_ID> \
-     css_fevm burns_piping_poc public \
-     --cdf-config-id burns-piping-poc-sync --profile fevm-css-demo
-   ```
+### Account-level RBAC and the `ag` claim
 
-Other notes:
-- `PARENT` is the database **resource path**, not the Postgres connect name.
-- Works at schema granularity — one config covers all 6 tables, present and future.
-- Destination catalog/schema must already exist (created in Phase 0, before this).
-- Requires Postgres 17 (Lakebase default).
-- `list-cdf-configs`/`list-cdf-statuses` return `NotFound` (404) when none exist yet —
-  not an empty list; don't treat that as an error during setup.
-- If a table is ever added to `public` later (e.g. a schema change), it needs its own
-  `ALTER TABLE ... REPLICA IDENTITY FULL;` **before** it will sync — the schema-level
-  CDF config covers future tables for sync *eligibility*, not their replica identity.
+Role groups are **account-level**, not workspace-local — this is what lets
+a user select/assume a specific role at login (Databricks' native RBAC
+"assume role" feature) rather than always authenticating as themselves and
+relying on the in-app switcher. When a caller goes through a fresh OAuth
+authorization flow and picks a role during it, the resulting forwarded
+access token's JWT carries an `ag` claim with that role's backing group ID.
+`getRequestIdentity` decodes this directly and, when present, narrows the
+caller's groups to exactly that one role for the request — bypassing the
+full-membership SCIM lookup entirely, since Databricks itself only issues
+`ag` after checking Assume permission.
 
-## Dashboard freshness: query CDC directly instead of waiting on a batch job
+This claim only appears via a genuinely fresh authorization exchange (e.g.
+an incognito window, or explicitly signing out first) — an already
+logged-in session's in-workspace role switcher, or a URL parameter against
+an already-authenticated session, doesn't trigger a new token exchange and
+so never carries it. Absent `ag` (the common case — a normal logged-in
+session), behavior is unchanged: full group membership, exactly as SCIM
+reports it.
 
-Reported live: "when I move projects through the pipeline the dashboard doesn't
-update." Root-caused precisely, not by assumption, with a live timed test:
+## Dashboards + Genie (one pair per project)
 
-1. Advanced a real line via the app, timestamped the write.
-2. Immediately queried `lb_lines_history` (the CDC landing table) for that
-   exact line — **the change was already there**, within the same second.
-   CDC itself was never the bottleneck.
-3. Queried `live_lines` (the batch-refreshed table `gold_line_status` was
-   built from at the time) — still showing the *old* value.
+Each live project has its own Lakeview dashboard (KPIs, stage-breakdown bar
+chart, completion pie, line-detail table) hardcoded to that project's
+`project_id` — no interactive filter needed — and natively linked via
+`uiSettings.genieSpace.overrideId` to that project's own curated Genie agent.
+One dashboard, one agent, one project, one integrated surface: the
+dashboard's own built-in "Ask Genie" button is already correctly scoped, so
+there's no separate in-app chat surface. Both are generated from a single
+template (`build_dashboard_config.py` / `build_agent_config.py`) — one
+project_id substitution away from another `.lvdash.json`/`.geniespace.json`
+pair, both deployed as native DABs resources.
 
-So the actual gap: `refresh_silver_gold` (the job that dedups
-`lb_*_history` into `live_*`, then used to rebuild `gold_line_status`/
-`gold_project_rollup` as physical tables) was **never chained to anything
-for direct app usage** — only to `simulate_new_data`/`reset_poc`. A real
-Estimator/Lead Engineer/Design Lead clicking through the actual workflow
-writes straight to Lakebase and nothing ever re-ran that job, so the
-dashboard sat frozen at whatever snapshot the last manual or
-simulate-triggered run happened to leave behind. Confirmed the job's own
-execution floor is ~90-110 seconds regardless of trigger (5 real historical
-runs, all in that range) — dominated by serverless notebook cold-start, not
-the actual work (six small MERGEs).
-
-Two fixes considered and rejected before landing on the real one:
-
-- **Periodic schedule** (e.g. every 1 minute) on `refresh_silver_gold` —
-  simple, but adds up to a full poll interval on top of the job's own
-  ~90-110s floor, so worst case is close to 3 minutes from write to
-  dashboard. Built, then reverted when a better option came up.
-- **App-triggered** (fire-and-forget `jobs().runNow()` after each write,
-  via AppKit's `jobs()` plugin) — removes the polling variance, but the
-  ~90-110s floor is the job's *execution* time, not trigger latency, so
-  this wouldn't have meaningfully helped, and adds a new app→Jobs-API
-  coupling (a job app-resource + `CAN_MANAGE_RUN` grant, code changes
-  across every mutating route, burst/redundant-run risk if multiple
-  actions land close together) to buy back a fraction of a floor that's
-  fixed either way. Not built.
-
-**What actually fixes it**: skip the batch rebuild entirely for the
-dashboard's sake. `gold_line_status`/`gold_project_rollup` are now **views**
-(`src/sql/ddl/04_gold_tables.sql`), not physical tables, built directly on
-top of `v_lines`/`v_stage_history`/`v_true_up_records`/`v_projects`
-(`03_union_views.sql`) — which themselves now compute their LIVE half
-**directly from the `lb_*_history` CDC tables** (a `ROW_NUMBER() OVER
-(PARTITION BY <pk> ORDER BY _pg_lsn DESC)` window, filtering out anything
-whose latest state is a delete — the exact same "latest per PK" logic
-`refresh_silver_gold.py` already used, just expressed as SQL and evaluated
-at query time instead of Python/PySpark on a batch schedule) UNION ALL with
-the unchanged, static `historical_*` tables. Since every dashboard/Genie
-query already just says `SELECT ... FROM gold_line_status` / `v_stage_history`
-by name, **zero changes were needed to the dashboard's dataset SQL or any of
-the 20 Genie per-project views** — they transparently inherit real-time data
-the next time they're queried.
-
-`refresh_silver_gold` still exists, narrowed in scope: it still refreshes
-`live_lines`/`live_projects` as physical tables (via the same MERGE logic as
-before), because `ml_batch_inference` reads those two directly rather than
-through a CDC-computed view — a stable, periodically-refreshed snapshot is
-exactly what batch ML scoring wants (you don't want a model-scoring pass
-recomputing against data that's shifting mid-run), unlike the dashboard.
-Still chained after `simulate_new_data`/`reset_poc`, still manually
-runnable, no schedule.
-
-**Trade-off, stated plainly:** the CDC tables (`lb_*_history`) are
-append-only — every change event ever synced, never compacted — so the
-"latest per PK" window function scans more rows as history accumulates.
-Fine at this PoC's scale (confirmed: sub-3-second query time with ~470
-lines' worth of accumulated CDC history), but a real, long-running
-deployment would eventually want either periodic `VACUUM`/history pruning
-on the CDC tables or a return to a batch-materialized approach at a much
-larger scale. Not a concern for this PoC's lifetime.
-
-**Verified live, end to end, with a real write and no job run in between:**
-advanced a real line via the app; `gold_line_status` still showed the old
-stage 3 seconds later (genuine CDC propagation delay, not zero); re-checked
-a few seconds after that and it was correct; `gold_project_rollup`'s
-`mode_stage` updated correspondingly. Also verified the permission chain
-holds for an identity other than the schema owner — asked BM-L-002's Genie
-agent (a completely independent identity from mine) the same question
-before and after, through the full new chain
-(`vw_genie_bm_l_002_lines` → `gold_line_status` view → `v_lines` CDC view →
-raw `lb_lines_history`) — got the correct, freshly-updated count (5), no
-permission errors. Not independently re-tested: the dashboard's own
-`embed_credentials` service-principal identity specifically (a third,
-different identity from both of the above) — worth a real-browser check,
-though the schema-level grants for the new CDC tables are identical to the
-already-working `historical_*`/old `gold_*` tables', so this is expected to
-work the same way.
-
-## AppKit app structure
-
-Scaffold: `databricks apps init --name burns-piping-poc --features analytics,lakebase
---set analytics.sql-warehouse.id=<WH_ID> --set lakebase.postgres.branch=<...> --set
-lakebase.postgres.database=<...>` — **confirm exact `--set` keys via `databricks apps
-manifest` at build time.**
-
-- **`/`** — Project picker. Lists only projects the OBO-authenticated user has any
-  role on (join `gold_project_rollup` + `live_user_project_role`); Admins see all.
-- **`/projects/:projectId`** — Main view: 6-stage timeline (from
-  `gold_project_rollup`), role badge top-right (effective role, see Auth below),
-  "View as role" dropdown next to it (Admin-group members only), that project's
-  own embedded dashboard — including its built-in, natively-linked "Ask Genie"
-  button (see "Dashboards + native Genie" below) — Kanban board (6 columns)
-  of `gold_line_status` rows.
-- **`/projects/:projectId/lines/:lineId`** — Line detail slide-over: full line-list
-  record, isometric/P&ID reference links, per-line stage-history timeline, true-up
-  baseline-vs-actual side-by-side when applicable, and the one action button for
-  whatever stage the line is at — rendered only if `effectiveRole` matches the
-  required role (Estimator→1, Lead Engineer→2/4/6, Design Lead→3/5).
-- **`/admin`** — Admin-only (Phase 9): manage `user_project_role` assignments
-  (assign/revoke, any project × any role) and a static reference of which
-  workspace group each in-app role maps to. **No project create/edit** — this
-  PoC's 5 live projects are each hardcoded into their own dashboard
-  (`resources/dashboards/*.dashboard.yml`) and Genie agent
-  (`resources/genie_spaces/*.genie-space.yml`); a 6th project created here
-  would silently get neither. Real project provisioning would need to extend
-  those bundle resources too, not just insert a Lakebase row — out of scope
-  for this PoC.
-
-## Auth / authorization design
-
-`getEffectiveRole(user, projectId, session)` — one function, used for both UI gating
-and every write-route's server-side check:
-
-1. Fetch the user's real group memberships via the OBO-authenticated call to the
-   workspace's SCIM **`/api/2.0/preview/scim/v2/Me`** endpoint (`server/lib/auth.ts`)
-   and its `.groups[].display` field. This endpoint returns a user's full group
-   membership regardless of whether a group is workspace-local or account-level —
-   confirmed by direct testing across both (see "Workspace-local -> account-level
-   group migration" below) — so `getEffectiveRole` itself needed zero changes when
-   the groups migrated; only `GROUP_TO_ROLE`'s literal name strings did.
-2. Look up `live_user_project_role` for `(user, projectId)` → the assigned role,
-   but only honor it if that role is also in the group-membership list from step 1
-   (defensive re-check — revoking group membership immediately invalidates a stale
-   assignment, no separate cleanup needed).
-3. If `session.viewAsOverride` is set **and** is one of the roles from step 1, return
-   the override instead. Otherwise return the result of step 2.
-
-**Reconciliation rule:** group membership = coarse eligibility ("which roles can this
-person ever hold"); `user_project_role` = actual per-project assignment.
-`getEffectiveRole` step 2 above enforces "assignment ⊆ eligibility" at **read**
-time, on every request — not by validating at write-time in `/admin`. The admin
-route (`server/routes/admin.ts`) writes `user_project_role` rows without an
-independent live check that the target user actually belongs to the matching
-workspace group (that would need a workspace-directory/SCIM Groups call under
-a more-privileged identity than this app has ever needed elsewhere), but this
-isn't a security gap: a mismatched assignment just silently has no effect,
-since step 2 won't honor it. `/admin` records *intent*; the real enforcement
-is entirely in `getEffectiveRole`, which is deliberately the *only* place this
-logic lives.
-
-### Workspace-local -> account-level group migration
-
-Originally built with plain **workspace-level** SCIM groups (`databricks groups
-create`) named exactly `Estimator`/`Lead Engineer`/`Design Lead`/`piping_admin` —
-sufficient for `getEffectiveRole`'s own logic (see step 1 above), and avoided
-needing an account-admin profile at all during initial build.
-
-That turned out to be the wrong call for how this PoC actually gets tested day to
-day: workspace-local groups can't be selected/assumed at login — a real tester
-logging in as themselves always gets *their own* identity, with no way to pick
-"log in as Estimator" the way account-level groups support (e.g. via SSO
-role/group selection). The whole point of a role-based demo is trying each role
-as if you were really that person, so this was a real, not cosmetic, gap.
-
-Migration (done live, workspace stayed up throughout — no code changes were
-needed in `getEffectiveRole` itself, only in the places that hardcode group
-*names*):
-1. Confirmed which of two candidate account profiles actually owns this
-   workspace (`f9ba5888-fdb9-4e53-9e5f-724c437d1779` — cross-checked against
-   `account_id` already recorded in 5 other existing CLI profiles for this same
-   workspace, then confirmed via `databricks account workspaces list` returning
-   this workspace as one of only 5 in that account).
-2. Account-level group creation requires the **Account Admin** role on that
-   specific account (distinct from being merely authenticated to it) — the
-   deploying identity didn't have it; a workspace admin granted it, then created
-   the 4 groups by hand via the Account Console. They couldn't reuse the exact
-   old names — this account already had unrelated groups named `Estimator` etc.
-   from other workloads — so all 4 got a ` Piping` suffix:
-   `Estimator Piping` / `Lead Engineer Piping` / `Design Lead Piping` /
-   `Admin Piping`.
-3. **Verified the linchpin fact before deleting anything**: called
-   `databricks current-user me --profile fevm-css-demo` (the same workspace-level
-   SCIM identity the app itself queries) and confirmed the new account groups
-   appeared in `.groups[].display` identically to how the old workspace groups
-   had — meaning `auth.ts`'s `fetchGroupsFromScim` needed no changes at all, only
-   `GROUP_TO_ROLE`'s keys (`roles.ts`), the dev fallback (`auth.ts`), the display
-   mapping in `/admin` (`admin.ts`), and each Genie space's `permissions:` block
-   (`resources/genie_spaces/*.genie-space.yml`) — all keyed by literal group-name
-   strings, none by ID.
-4. Old workspace-local groups deleted by the workspace admin once (3) confirmed
-   the new ones work.
-
-### Databricks "assume role" — found the real mechanism (`ag` token claim)
-
-Account-level groups unlocked Databricks' real, documented RBAC "assume role"
-feature (https://docs.databricks.com/aws/en/security/auth/rbac/switch-roles).
-Getting to the actual working mechanism took ruling out several plausible but
-wrong ones first — worth recording all of them, since the wrong ones looked
-just as promising on paper:
-
-1. **Workspace UI role switcher** (top-right → hover workspace → pick a role):
-   switched in-session, then opened the app in the same browser session —
-   app still showed the real identity's full group list.
-2. **`aid=<group-id>` URL parameter** (documented to persist across
-   navigation, unlike #1): tried directly on the app's own URL — no effect.
-   Tried on the *workspace* URL first — this one genuinely worked at the
-   workspace level (confirmed: entered the workspace under the assumed
-   Estimator role) — but navigating into the app from there still showed the
-   full identity.
-3. **Directly against the raw SCIM `/Me` API** the app actually calls — added
-   `?aid=<group-id>` straight onto the API call itself. Zero effect.
-4. **`assume_group` OAuth parameter** via `databricks auth login`: decoded
-   the resulting JWT — no role claim anywhere.
-
-**All four failed for the same reason**: none of them forced a *new* OAuth
-token exchange — they all reused an already-cached session/token (confirmed
-directly: hitting the app with and without `?aid=` produced byte-for-byte
-the same token, same `jti`). SCIM `/Me` is also a pure identity-*directory*
-lookup regardless — it always returns full group membership no matter what
-token calls it, so even a role-scoped token wouldn't change *that specific
-API's* answer.
-
-**What actually works:** forcing a genuinely fresh authorization-code
-exchange — opening the app in an incognito window (or otherwise starting
-with no cached session) triggers a real login prompt that lets the user pick
-a role. The resulting `x-forwarded-access-token`'s decoded JWT payload then
-carries an `ag` ("assumed group") claim with that role's backing group ID —
-confirmed directly: selecting Estimator produced `"ag":"153366456771408"`,
-exactly Estimator Piping's group ID. This is a claim on the token itself, not
-something any directory-lookup API would surface — which is exactly why
-mechanisms 1-4 above, all of which only affected session/URL/API-call state
-rather than forcing a fresh token, never showed anything.
-
-**Wired into the app** (`server/lib/auth.ts`, `server/lib/roles.ts`):
-`getRequestIdentity` decodes the forwarded token's JWT payload (no signature
-verification needed — the token is already the trusted OBO bearer credential
-issued by Databricks' own reverse proxy; decoding it locally is just reading
-a claim already implicitly trusted). If `ag` is present and matches one of
-the 4 known group IDs (`GROUP_ID_TO_NAME`, kept as a separate ID-keyed map
-alongside the display-name-keyed `GROUP_TO_ROLE` — same 4 groups, different
-keyspace), the request's `groups` is narrowed to exactly that one group,
-bypassing the SCIM call entirely — no reconciliation against real membership
-needed, since Databricks itself only ever issues `ag` after checking Assume
-permission. Absent (normal login, no role picked), behavior is unchanged —
-full SCIM group list, exactly as before.
-
-**Practical consequence:** `conor.smith@databricks.com` — a permanent member
-of all 4 groups — can now genuinely test each restricted role without any
-separate test accounts: open the app in an incognito window and pick a role
-at the login prompt. The separate-test-user idea floated earlier turned out
-to be unnecessary.
-
-**Incidental bug found and fixed along the way:** the SCIM `/Me` API's
-`groups` array order is unstable — confirmed directly (two identical calls,
-same token, no parameters changed, two different orderings). Un-sorted, this
-made the landing page's role badges visibly reorder on every load. Fixed in
-`eligibleRoles()` (`roles.ts`) by filtering the fixed `ROLES` array against
-group membership, rather than building the result in whatever order the API
-happened to return.
-
-**A second, more serious bug the `ag` claim immediately exposed** (only
-possible to hit once assume-role sessions actually worked): `GET
-/api/projects` (`server/routes/projects.ts`) filtered projects by "does *any*
-`user_project_role` row exist for this user" rather than "does a row exist
-for one of their *currently eligible* roles." `conor.smith` has a
-`user_project_role` row on every project — originally all `'Admin'`, kept
-mostly out of habit from before `getEffectiveRole`'s fallback rule existed
-(that rule grants Admin access with **no row at all**, so the explicit rows
-were always redundant for Admin specifically). Once assumed down to just
-`Estimator` via `ag`, that unfiltered join still matched every project (a row
-existed, just for a role no longer eligible), the picker showed all 5 instead
-of none, and the `yourRole` badge still showed the raw stored `'Admin'`
-value instead of the actual effective role — so a session that had correctly
-narrowed to Estimator for `/api/me` was then contradicted by the project
-list. Fixed by adding `AND upr.role = ANY($eligible)` to the query and the
-same filter to the badge lookup, so both agree with `getEffectiveRole`'s own
-reconciliation rule instead of re-deriving a subtly different one.
-
-Also updated the seed data to make this testable at all: `conor.smith` had
-zero `user_project_role` rows for any role other than `'Admin'`, so even
-after the query fix, an assumed-Estimator session would correctly see *zero*
-projects — technically correct, but not useful for demoing/testing.
-`generate_live_seed.py` now gives `conor.smith` one real assignment per
-non-admin role, on a different project each (`Estimator` on BM-L-001,
-`Lead Engineer` on BM-L-002, `Design Lead` on BM-L-003) instead of a blanket
-`'Admin'` row everywhere; BM-L-004/005 get no `conor.smith` row at all,
-relying entirely on the fallback rule for Admin-eligible sessions. Applied
-directly to the live Lakebase table (a one-off `UPDATE`/`DELETE`, via an
-ad-hoc `databricks jobs submit` run — the same `w.postgres.*` + psycopg2
-pattern as `simulate_new_data`/`reset_poc`, since local `pip install
-psycopg2-binary` is blocked by this machine's proxy setup) and regenerated
-into `seed_live_data.sql` so `reset_poc` stays consistent with it going
-forward.
-
-**"View as role" design — bounded, not a superuser bypass:** visible only to
-`Admin Piping`-group members (displayed in-app as the "Admin" role); the dropdown
-only offers roles the tester is *actually* a group-member of.
-`conor.smith@databricks.com` is added to all 4 groups (`Estimator Piping`,
-`Lead Engineer Piping`, `Design Lead Piping`, `Admin Piping`), so this gives full testing coverage without a
-separate unbounded-bypass code path that would let a demo show behavior no real
-account setup could reproduce.
-
-## Dashboards (one per project, superseded design)
-
-**Current design (Phase 8b) — see "Dashboards + native Genie" below.** This
-section is kept for history: the original plan (and Phase 5's actual build)
-was **one shared** Lakeview dashboard, datasets over `gold_line_status` /
-`gold_project_rollup`, with a `project_id` filter field, embedded via
-`<iframe src={dashboardUrl}?f_project_id=<projectId>>`. That was replaced
-once it became clear a single dashboard object can't be natively,
-correctly linked to a specific project's Genie agent — see below.
-
-## Genie agents (one per live project, static per-project views, bundle-managed)
-
-Genie agents execute under a shared space identity, not per-asking-user OBO, so
-per-project isolation must be **static, literal-`project_id` SQL views** — not a
-dynamic row filter keyed on `current_user()`. Per live project `P`:
-
-- `vw_genie_<P>_lines` = `SELECT * FROM gold_line_status WHERE project_id='<P>'`
-- `vw_genie_<P>_stage_history` = `SELECT * FROM v_stage_history WHERE project_id='<P>'`
-  (full audit/confirmation log — who/when/role — not just dashboard-level
-  aggregates, per the explicit "broader tables, appropriately scoped" ask)
-- `vw_genie_<P>_true_up` = true-up + change-log detail joined, filtered to `P`
-- `vw_genie_<P>_predictions` (after the ML phase) = `gold_ml_predictions WHERE
-  project_id='<P>'`
-
-15-20 view objects total across 5 agents — comfortably under Genie's per-agent
-object guidance.
-
-**Creation/deployment — bundle-native, confirmed via `databricks bundle schema`:**
-design and get approval on the **first** project's agent shape via the
-`databricks-genie-agents` skill's create workflow (`discover-schema` → draft
-`serialized_space` → approval → `create-space`, done once interactively, not as a
-deployed job). Then run `databricks bundle generate genie-space` against that
-approved space to pull its `serialized_space` into `src/genie/<project_id>.
-geniespace.json` and scaffold `resources/genie_spaces/<project_id>.genie-space.yml`
-(fields: `title`, `description`, `warehouse_id: ${var.warehouse_id}`, `parent_path`,
-`file_path: ../../src/genie/<project_id>.geniespace.json`). Template that same shape
-— substituting the per-project view names — across the remaining four projects'
-resource files and `.geniespace.json`s. From then on, `databricks bundle deploy`
-creates/updates all 5 agents alongside everything else; no standalone script needed.
-
-## Dashboards + native Genie (current design, Phase 8b)
-
-Two designs were tried and superseded before landing here — worth recording
-why, since both were reasonable-looking first instincts:
-
-1. **One shared dashboard + a `project_id` filter** (Phase 5). Simple, but a
-   dashboard's native Genie link (`uiSettings.genieSpace.overrideId`) is one
-   static space ID baked into the dashboard *object* — incompatible with a
-   shared dashboard, since a static ID can never track which project the
-   viewer currently has selected.
-2. **Keep the shared dashboard, add a separate in-app Genie chat tab**
-   (Phase 8a) — AppKit's `genie()` plugin with a per-project `spaces` map,
-   rendered via `<GenieChat alias={project.projectId} />`. This *worked* —
-   verified live, correct project-scoped answers — but every Lakeview
-   dashboard also gets a **default built-in "Ask Genie" button**
-   automatically (confirmed by observing one on the Phase 5 dashboard, which
-   had no `uiSettings.genieSpace` configured at all — the field's own name,
-   "**override**Id", implies a default exists to override). Two "Ask Genie"
-   entry points on the same page reads as a bug, not a feature.
-
-**Current design: one dashboard per project**, each natively linked to that
-project's own agent — a single integrated surface, no separate chat tab:
-
-- `src/dashboards/build_dashboard_config.py` generates 5 near-identical
-  dashboards from the Phase 5 template, for each project: (a) hardcodes
-  `AND project_id = '<project_id>'` into both dataset queries (no
-  interactive filter widget needed — mirrors the static per-project Genie
-  views from Phase 7), (b) sets
-  `uiSettings.genieSpace = {isEnabled: true, overrideId: <that project's
-  real Genie space ID>, enablementMode: "ENABLED"}`. Space IDs are hardcoded
-  literals (same reasoning as `DASHBOARD_ID` originally being one) — a
-  `file_path`-loaded dashboard JSON is opaque to bundle variable
-  substitution, so `${resources.genie_spaces...}` can't reach inside it.
-- `resources/dashboards/*.dashboard.yml` (5 files, resource keys
-  `dash_bm_l_00N` — plain `bm_l_00N` collides with the genie_spaces resource
-  of the same name) — `bundle deploy` creates/updates all 5; each still
-  needs a separate `databricks lakeview publish --embed-credentials` after
-  any change (bundle deploy only updates the draft).
-- `server/routes/config.ts`'s `/api/config` now takes a `projectId` query
-  param and looks up that project's own dashboard ID from 5 env vars
-  (`DASHBOARD_ID_BM_L_00N`, set as plain literals in `app.yaml` — no AppKit
-  "dashboard" resource type exists to bind them via `valueFrom`).
-  `DashboardEmbed.tsx` calls it per-project instead of appending a filter
-  query parameter to one shared dashboard URL.
-- Phase 8a's `genie()` plugin, `GenieAssistant.tsx`, `dashboards.genie` OBO
-  scope, and the 5 `genie_space` app-resource bindings were all removed —
-  the app itself no longer talks to the Genie Conversation API at all. The
-  `CAN_RUN` permission grants on each Genie space
-  (`resources/genie_spaces/*.genie-space.yml`) stayed, since real end users
-  still need that permission to use each dashboard's built-in Genie button,
-  regardless of which mechanism reaches the space.
-
-**Verified live:** each dashboard's `uiSettings.genieSpace.overrideId`
-matches its project's real Genie space ID (checked via `lakeview get` for
-BM-L-001 and BM-L-005), and each dashboard's own dataset queries return
-exactly that project's line count (BM-L-001 → 22, BM-L-005 → 15) rather than
-all 5 projects' data. Not yet confirmed in an actual browser: clicking the
-built-in "Ask Genie" button itself (see README "Known follow-ups").
+Genie agents run under a shared space identity (not per-asking-user OBO), so
+per-project isolation is static: each agent is scoped to 4 views filtered by
+literal `project_id` — `vw_genie_<project>_lines`, `_stage_history`,
+`_true_up` (joined with change-log detail), `_predictions` — deliberately
+broader than the dashboard's own aggregated tables (full audit trail: who
+confirmed what and when, true-up reconciliation detail, not just KPIs).
+Access to each space is granted at `CAN_RUN` to all 4 role groups.
 
 ## ML pipeline
 
-- **Training grain:** line × stage-transition, not project — 20-30 historical
-  projects × ~20-60 lines × 6 transitions ≈ 3,000-10,000 rows, workable for a
-  gradient-boosted regressor. Generate via Faker/Spark (`databricks-synthetic-data-gen`
-  conventions): stage durations log-normal, correlated with size/material/complexity,
-  with a deliberate subset of large-NPS/exotic-material lines taking longer at
-  true-up stages (gives the model — and the demo narrative — something real to find).
-- **Feature table `ml_stage_transition_features`:** `project_id`, `line_id`,
-  `stage_number`, `stage_name`, `stage_entry_ts`, `stage_exit_ts` (null if in-flight),
-  `duration_hours` (label, null if in-flight), line attributes (`nominal_size_in`,
-  `material`, `line_class_spec`, `service`, `insulation_type`, `heat_tracing_flag`,
-  `estimated_centerline_length_ft`), project attributes (`num_lines_in_project`,
-  `project_type`), `data_origin`.
-- **Model:** one XGBoost regressor predicting `log(duration_hours)`, `stage_number`
-  as a categorical feature, trained only on fully-completed historical transitions
-  (no censoring needed — historical projects are closed). `mlflow.xgboost.autolog()`
-  + Optuna, registered to UC as `css_fevm.burns_piping_poc.stage_duration_model`,
-  `@prod` alias — the `databricks-ml-training` skill's canonical flow. No Feature
-  Store/`FeatureLookup` (none of its triggers apply to a PoC at this scale) — plain UC
-  table.
-  - *Deferred to v2:* one model per stage (6 small models); proper survival analysis
-    for in-flight/censored lines.
-- **Batch inference:** loads `models:/.../stage_duration_model@prod` via
-  `mlflow.pyfunc.spark_udf`, scores every live line's current open transition, then
-  iteratively rolls forward through remaining stages for an estimated completion
-  date. Writes `gold_ml_predictions` (project_id, line_id, current_stage,
-  predicted_remaining_hours, predicted_completion_ts, model_version, scored_at) —
-  overwrite per run. Surfaces as an "Est. completion" Kanban column, a dashboard KPI,
-  and the `vw_genie_<P>_predictions` view. Chained as a `run_job_task` at the end of
-  `simulate_new_data` (and kept independently runnable) — not on its own schedule, so
-  scores don't shift mid-demo unexpectedly.
+- **Training grain:** line × stage-transition. ~5,300 rows from the 25
+  historical closed projects, XGBoost regressor on `log(duration_hours)`,
+  tuned via 20 Optuna trials. Held-out performance: R² ≈ 0.86 (log scale),
+  MAE ≈ 11 hours. Registered to UC (`stage_duration_model`) with a `@prod`
+  alias.
+- **Batch inference:** loads the `@prod` model, scores every live in-flight
+  line's current stage and iteratively rolls forward through remaining
+  stages for an estimated completion timestamp, writes
+  `gold_ml_predictions` (full overwrite per run). Surfaces as the Kanban ETA
+  column, a dashboard KPI, and each project's Genie `_predictions` view.
 
-## Simulation & reset jobs (Phase 9, built as planned with a few simplifications)
+## Simulation & reset jobs
 
-Both jobs have **no `schedule`/`trigger` block** — manual-only (`run-now` via
-CLI/Jobs UI or `databricks bundle run <job> -t dev`).
+Both manual-trigger only (no schedule).
 
-- **`simulate_new_data`**: task `simulate`
-  (`src/notebooks/simulate/simulate_new_data.py`) connects to Lakebase via
-  `w.postgres.generate_database_credential` + psycopg2 (databricks-lakebase
-  skill's "Pattern 1: Direct Connection" — a fresh token, no refresh loop
-  needed for a one-shot batch job), inserts 3-8 new stage-1 lines and
-  advances a random sample of existing in-flight lines by exactly one stage
-  each — writing the same shape of `stage_events`/`true_up_records`/
-  `change_log` rows + `lines.current_stage` update as the corresponding app
-  route (see the stage-action table above) — across the 5 live projects,
-  deliberately through Lakebase rather than straight to Delta, so every run
-  exercises the real CDC path. Chains `refresh_gold` → `run_job_task` into
-  `refresh_silver_gold`, then `rescore_predictions` → `run_job_task` into
-  `ml_batch_inference` (both unconditional, not optional — a demo always
-  wants the dashboards/Genie/ML surfaces caught up by the time the job
-  finishes, not a separate manual step after).
-- **`reset_poc`**: task `reset` (`src/notebooks/reset/reset_poc.py`)
-  `DELETE`s all 6 Lakebase tables **unconditionally** (no `WHERE project_id
-  IN (...)` needed — Lakebase holds *only* these 5 live projects' data, so
-  an unqualified delete in FK-safe child-to-parent order — `change_log` →
-  `true_up_records` → `stage_events` → `lines` → `user_project_role` →
-  `projects` — is exactly equivalent to a scoped one), then replays
-  `src/sql/lakebase/seed_live_data.sql` verbatim (line-by-line `INSERT`
-  execute, skipping its own `BEGIN;`/`COMMIT;` lines since psycopg2's own
-  transaction already provides that boundary) — the same frozen,
-  deterministic file applied once at initial setup, never regenerated with a
-  new random seed. `TRUNCATE` vs. `DELETE`: went with `DELETE`, and it's
-  confirmed to work correctly with CDC — `refresh_silver_gold`'s
-  `whenNotMatchedBySourceDelete` already correctly drops any PK whose
-  *latest* CDC state is a delete, which after a reset is every row not
-  present in the reseed (including anything `simulate_new_data` added since
-  the last reset). No separate "clear gold_ml_predictions" step turned out
-  to be needed either — `ml_batch_inference` already does a full
-  `write.mode("overwrite")`, so simply re-running it (chained the same way
-  as in `simulate_new_data`) produces a correct fresh baseline on its own.
-  **Verified live end-to-end** (Phase 9 checkpoint): ran `simulate_new_data`
-  (93 → 100 lines, 7 tagged `-SIM-`, predictions 83 → 90), then `reset_poc`
-  (back to exactly 93 lines, 0 `-SIM-` lines, predictions back to exactly 83
-  — matching the original Phase 6 checkpoint's recorded count byte-for-byte).
+- **`simulate_new_data`**: connects to Lakebase the same way the app does
+  (OAuth database credential + psycopg2), inserts a few new stage-1 lines
+  and advances a random sample of in-flight lines by one stage each — the
+  same write shape as the app's own stage-action routes — deliberately
+  through Lakebase, not straight to Delta, so it exercises the real CDC
+  path. Chains `refresh_silver_gold` then `ml_batch_inference`.
+- **`reset_poc`**: deletes all 6 Lakebase tables (safe unconditionally —
+  they hold only these 5 projects' data) and replays a frozen,
+  deterministic seed file verbatim, restoring the exact original baseline.
+  Same chaining.
 
 Historical tables are never touched by either job.
 
 ## v2 shell (S3D write-back)
 
-A clearly-marked stub, e.g. `src/app/server/integrations/s3d.ts`:
-`pushToS3D(lineId, payload)` — TODO comments, commented-out example connection code
-(pyodbc/SQL-Server-style), called (but no-op) from the stage-action routes so wiring
-it up later is a localized change, not a new integration point. No real connection —
-confirmed placeholder-only per stakeholder.
-
-## Build sequencing (9 phases, 5 stakeholder checkpoints)
-
-| Phase | Scope | Notes |
-|---|---|---|
-| 0 | Bundle-deploy UC schema + Lakebase project/branch/database (bundle resources), table DDL, workspace groups (`Estimator`/`Lead Engineer`/`Design Lead`/`piping_admin`) + membership | Sequential — everything depends on this |
-| 1 | Synthetic historical data (20-30 closed projects) + live seed snapshot | Parallel with Phase 2 |
-| 2 | App skeleton: `apps init`, picker + project-view shell, OBO + `getEffectiveRole`, nav | Parallel with Phase 1 |
-| 3 | All 6 stage-action forms (writing to Lakebase), Kanban wired, role-gating | After Phase 2 |
-| 4 | Lakebase CDC wiring (`create-cdf-config`), `refresh_silver_gold`, verify write→CDC→gold end-to-end | After Phase 3 |
-| 5 | Dashboard build + embed | Parallel with Phase 4 once Phase 1's historical gold data exists |
-| 6 | ML training + batch inference | After Phase 4 (live gold data) and Phase 1 (historical data) |
-| 7 | Design+approve 1st Genie agent, `bundle generate genie-space`, template to remaining 4 as bundle resources | Parallel with Phase 6, after Phase 4 |
-| 8 | `simulate_new_data` + `reset_poc` jobs | After Phase 4 (must exercise real CDC) |
-| 9 | Polish: `/admin`, view-as-role switcher, demo script rehearsal | Last |
-
-**Checkpoints:** (1) after Phase 0-1 — schema + realistic historical data to review;
-(2) after Phase 2-3 — app clickable end-to-end against Lakebase, pre-CDC; (3) after
-Phase 4-5 — the "wow" moment: a form submission flows through CDC into a live
-dashboard; (4) after Phase 6-7 — predictive ETAs + a working Genie agent; (5) after
-Phase 8-9 — full rehearsal: simulate → observe → reset → repeat.
-
-## Critical files
-
-- `piping_PoC/databricks.yml`
-- `piping_PoC/resources/schema.burns_piping_poc.yml`,
-  `resources/postgres_project.burns_piping_poc.yml`
-- `piping_PoC/src/sql/ddl/01_live_tables.sql` (+ `02_historical_tables.sql`,
-  `03_union_views.sql`, `04_gold_tables.sql`, `06_genie_project_views.sql`)
-- `piping_PoC/src/sql/lakebase/00_schema.sql`
-- `piping_PoC/src/notebooks/etl/refresh_silver_gold.py`
-- `piping_PoC/src/app/server/server.ts` (`getEffectiveRole` + the 6 write routes)
-- `piping_PoC/resources/jobs.simulate_new_data.yml`, `jobs.reset_poc.yml`
-- `piping_PoC/resources/genie_spaces/<project_id>.genie-space.yml` (x5) +
-  `piping_PoC/src/genie/<project_id>.geniespace.json` (x5)
-
-## Verification (end-to-end, per checkpoint)
-
-1. **Schema/data (Ckpt 1):** `databricks experimental aitools tools query` against
-   `historical_lines`/`historical_stage_history` — row counts (≥20 projects, sane
-   line counts), spot-check a few full line lifecycles.
-2. **App skeleton (Ckpt 2):** log in as the test user, confirm project picker shows
-   only assigned projects, submit each of the 6 stage actions as the right role and
-   confirm a wrong-role attempt is rejected server-side (not just hidden in the UI).
-3. **CDC + dashboard (Ckpt 3):** submit a stage action in the app, poll
-   `lb_stage_events_history`/`get-cdf-status` until the row lands, run
-   `refresh_silver_gold`, refresh the embedded dashboard and confirm the number
-   moved.
-4. **ML + Genie (Ckpt 4):** run the training job, confirm `@prod` alias set; run
-   batch inference and confirm `gold_ml_predictions` has a row per live in-flight
-   line; ask each project's Genie agent a project-specific question and confirm it
-   can't see another project's lines.
-5. **Simulate/reset (Ckpt 5):** run `simulate_new_data`, confirm new/advanced lines
-   appear in the app and dashboard; run `reset_poc`, confirm state matches the frozen
-   seed exactly (row counts + a spot-checked line back at stage 1).
+A clearly-marked stub (`src/app/server/integrations/s3d.ts` pattern): a
+placeholder function called (but no-op) from the stage-action routes, so
+wiring up a real SQL Server connection later is a localized change. No live
+connection exists.

@@ -1,6 +1,6 @@
 # Demo Script
 
-A live, repeatable walkthrough of the PoC. Total time ~15-20 minutes. Everything
+A live, repeatable walkthrough of the PoC. Total time ~18-22 minutes. Everything
 below has been run and verified against the deployed app, not just planned.
 
 **App:** https://burns-piping-poc-7405608145506562.2.azure.databricksapps.com
@@ -61,10 +61,7 @@ baseline)
 3. Navigate to a **different** project (e.g. BM-L-003) and repeat the same
    question. Point out the answer is genuinely different — a different
    `spaceId`, a different underlying view — because each project has its own
-   dashboard object, each natively linked to its own Genie agent. (This is
-   also why there's only *one* "Ask Genie" button on the page, not two — an
-   earlier version of this PoC added a second, app-level Genie chat tab and
-   it read as a bug, not a feature; see `ARCHITECTURE.md`.)
+   dashboard object, each natively linked to its own Genie agent.
 
 ## 3. Predictive ETAs (~2 min)
 
@@ -75,33 +72,44 @@ closed projects (~5,300 completed stage-transitions), XGBoost on
 log(duration), R²≈0.86 / MAE≈11 hours on held-out data — good enough to make
 the ETA feel real, explicitly caveated as trained on synthetic data if asked.
 
-## 4. Watch new activity flow through the real pipeline (~3 min)
+## 4. Watch a single action reach the dashboard live (~2 min)
+
+The dashboard and Genie read straight from CDC, not a batch snapshot — so
+this doesn't need `simulate_new_data` to show:
+
+1. Have the dashboard open on a project's **Dashboard** tab, showing its
+   current stage-breakdown chart.
+2. In another tab, perform one real stage action on that same project (e.g.
+   confirm a line as Lead Engineer).
+3. Switch back to the dashboard tab and refresh. The bar chart has already
+   moved — no job to wait for, just the couple of seconds it takes Lakehouse
+   Sync to replicate the write.
+
+## 5. Simulate a burst of activity (~3 min)
 
 1. Run **`simulate_new_data`** (Jobs UI or `databricks bundle run
-   simulate_new_data -t dev`). Narrate while it runs (~4 min: writes to
-   Lakebase, then chains `refresh_silver_gold`, then `ml_batch_inference`):
-   this goes through the *actual* app-facing database, the *actual* CDC
-   pipeline (Lakehouse Sync), not a shortcut straight into Delta.
-2. Once it finishes, refresh the app. Show: new stage-1 lines appeared on the
-   Kanban board, some existing lines advanced a stage, the dashboard's counts
-   moved, and `gold_ml_predictions` rescored — all without touching any app
-   code. This is the "wow" moment: a human-shaped write (or a simulated one)
-   flows through Postgres → CDC → Delta → gold → dashboard/Genie/ML
-   automatically.
+   simulate_new_data -t dev`) — writes several new lines and stage advances
+   at once through the real Lakebase → CDC path, then chains
+   `refresh_silver_gold`/`ml_batch_inference` to keep `live_lines` and the
+   ML predictions caught up too (~4 min total for the full chain, though the
+   dashboard itself reflects the individual writes within seconds, same as
+   step 4).
+2. Refresh the app: new stage-1 lines on the Kanban board, some existing
+   lines advanced, `gold_ml_predictions` rescored.
 
-## 5. Admin (~1 min)
+## 6. Admin (~1 min)
 
 Open **Admin** (nav bar, visible because you're an `Admin Piping` group
 member) — shows every current per-project role assignment across all 5
 projects, and lets you assign/revoke one live. Mention the reconciliation
 rule: an assignment here only takes effect if the target user is *also* a
-real member of the matching workspace group — the write here is a record of
-intent, the actual access check re-runs independently on every request.
+real member of the matching account-level group — the write here is a record
+of intent, the actual access check re-runs independently on every request.
 
-## 6. Reset (~1 min)
+## 7. Reset (~1 min)
 
 Run **`reset_poc`**. Show the app back at exactly the original 93-line
-baseline — the new/advanced lines from step 4 are gone, `gold_ml_predictions`
+baseline — the new/advanced lines from step 5 are gone, `gold_ml_predictions`
 is back to 83 rows. Ready to run the whole demo again immediately.
 
 ## Appendix: what's real vs. synthetic
