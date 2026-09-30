@@ -245,6 +245,35 @@ Lead-Engineer-confirmed (stage 2) line correctly 409s on both edit and
 delete attempts; a wrong-role (Lead Engineer) delete attempt on a stage-1
 line correctly 403s ahead of any stage check.
 
+### Client-side "who acts next" bug (STAGE_ROLE was inverted)
+
+Found immediately after shipping the above: an Estimator clicking "Confirm
+Initial Data Entry" on their own just-created line got
+`This action requires role Lead Engineer; you are Estimator on this
+project.` — a correct 403 from the server (its role gate was never wrong),
+but the button should never have been shown to the Estimator at all.
+
+Root cause: `LineDetailPanel.tsx`'s local `STAGE_ROLE` map (used only for
+client-side "can I act on this / who am I waiting on" display, entirely
+separate from the real server-side gate on each route) was defined as
+"stage N → the role whose action **produced** stage N" (`{1: 'Estimator',
+2: 'Lead Engineer', ...}`) — correct-sounding, but the wrong question. The
+component actually needs "given a line **currently sitting** at stage N,
+which role acts **next**": stage 1 → Lead Engineer (who performs Initial
+Engineer Confirmation), not Estimator (who already acted to create it).
+Every entry was off by exactly this one-stage shift. Fixed to
+`{1: 'Lead Engineer', 2: 'Design Lead', 3: 'Lead Engineer', 4: 'Design
+Lead', 5: 'Lead Engineer'}` (no stage-6 entry — `is_complete` is already
+true by the time a line reaches stage 6). Also fixed the identically-wrong,
+currently-unused `STAGE_ROLE` export in `server/lib/roles.ts` for the same
+reason — not a live bug (nothing consumes it — every route hardcodes its
+own required role directly), but left correct rather than deleted so it
+isn't a trap if something starts using it later.
+
+Confirms the defense-in-depth from Phase 2-3 did its job here: a real UI
+bug produced a correct-but-confusing 403 instead of ever letting the wrong
+role actually advance a stage.
+
 ## Lakebase → Delta CDC ("Lakehouse Sync", Beta — confirmed mechanism)
 
 This is the **opposite direction** from Lakebase "synced tables" (Delta→Postgres).

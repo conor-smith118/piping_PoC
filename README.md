@@ -227,6 +227,20 @@ this repo references.
       edit/delete both correctly 409 once a Lead Engineer has confirmed the
       line (stage 2); a wrong-role delete attempt correctly 403s ahead of
       any stage check.
+- [x] Phase 14 — fixed an inverted "who acts next" bug reported live: an
+      Estimator clicking **Confirm Initial Data Entry** on their own
+      just-created line got a (correct, but confusing) 403 — the button
+      should never have been shown to them at all.
+      `LineDetailPanel.tsx`'s local `STAGE_ROLE` map had every stage's
+      required-actor off by one conceptual step (it mapped "who performed
+      the action that produced this stage" instead of "who acts next on a
+      line already at this stage" — e.g. stage 1 → Estimator instead of
+      Lead Engineer). Fixed there and in the identically-wrong, currently
+      unused `server/lib/roles.ts` export of the same name. The server-side
+      role gate on every route was never wrong — this was purely a
+      client-side display bug, confirmed by the fact that it failed safely
+      (a confusing 403) rather than letting the wrong role actually act.
+      Full trail in `ARCHITECTURE.md`.
 
 ## Known follow-ups (need your real browser, not just my CLI access)
 

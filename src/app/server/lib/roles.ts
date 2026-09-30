@@ -62,14 +62,23 @@ export function eligibleRoles(groups: string[]): Role[] {
   return ROLES.filter((r) => set.has(r));
 }
 
-/** Stage number (1-6) -> the role that performs that stage's action. */
+// Given a line's CURRENT stage, which role acts NEXT to advance it — e.g.
+// STAGE_ROLE[1] is 'Lead Engineer' (who performs Initial Engineer
+// Confirmation on a line already at stage 1), not 'Estimator' (who
+// performed the action that put it there). Not currently consumed by any
+// route (each route hardcodes its own required role directly — this is
+// purely a display/UX helper), but kept correct rather than deleted: an
+// earlier version of the *client's* copy of this exact map had the wrong
+// semantic (mapped stage -> the role who caused entry into it, not who
+// acts next), which showed the Confirm button to the wrong role — see
+// components/LineDetailPanel.tsx and ARCHITECTURE.md. No stage-6 entry:
+// a line is always `is_complete` by the time it reaches stage 6.
 export const STAGE_ROLE: Record<number, Role> = {
-  1: 'Estimator',
-  2: 'Lead Engineer',
-  3: 'Design Lead',
-  4: 'Lead Engineer',
-  5: 'Design Lead',
-  6: 'Lead Engineer',
+  1: 'Lead Engineer',
+  2: 'Design Lead',
+  3: 'Lead Engineer',
+  4: 'Design Lead',
+  5: 'Lead Engineer',
 };
 
 export const STAGE_NAMES: Record<number, string> = {

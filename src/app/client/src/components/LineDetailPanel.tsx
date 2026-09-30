@@ -26,8 +26,22 @@ const STAGE_NAMES: Record<number, string> = {
   1: 'Initial Data Entry', 2: 'Initial Engineer Confirmation', 3: 'Preliminary True-Up Complete',
   4: 'Engineer Prelim True-Up Confirmation', 5: 'Final True-Up Complete', 6: 'Engineer Final Confirmation',
 };
+// Given a line's CURRENT stage, which role acts NEXT to advance it — NOT
+// which role's action produced that stage (a real bug: this used to read
+// {1: 'Estimator', 2: 'Lead Engineer', ...}, i.e. "who performed stage N's
+// action," which meant a line sitting AT stage 1 showed the Confirm button
+// to the Estimator who just created it — instead of the Lead Engineer who
+// actually confirms Initial Data Entry — and simultaneously told a Lead
+// Engineer looking at that same line "waiting on Estimator," backwards. The
+// server-side role gate on each route was never wrong — POST
+// /confirm-initial has always correctly required Lead Engineer — so this
+// only ever produced a correct-but-confusing 403 for the Estimator, never a
+// real authorization gap). Stage 6 has no entry: `is_complete` is already
+// true by the time current_stage reaches 6 (set in the same transaction as
+// the final confirmation), so the `line.is_complete` branch below always
+// short-circuits first.
 const STAGE_ROLE: Record<number, Role> = {
-  1: 'Estimator', 2: 'Lead Engineer', 3: 'Design Lead', 4: 'Lead Engineer', 5: 'Design Lead', 6: 'Lead Engineer',
+  1: 'Lead Engineer', 2: 'Design Lead', 3: 'Lead Engineer', 4: 'Design Lead', 5: 'Lead Engineer',
 };
 
 function ConfirmAction({
