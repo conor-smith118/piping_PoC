@@ -12,7 +12,7 @@ import {
   SelectValue,
   Alert,
 } from '@databricks/appkit-ui/react';
-import { api } from '../../lib/api';
+import { api, type LineDetailRow } from '../../lib/api';
 
 // Field pools grounded in the S3D/line-list research (see ARCHITECTURE.md) —
 // real EPC vocabulary, not generic placeholders.
@@ -65,15 +65,57 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-/** Stage 1: Initial Data Entry (Estimator). */
+/** Pre-fills the form from an existing line's full record — used by edit
+ * mode. `pg` returns `numeric` columns as strings already in most cases,
+ * but String(...) normalizes either way for these plain <Input> fields. */
+function fromLine(line: LineDetailRow): FormState {
+  return {
+    service: line.service ?? '',
+    originTag: line.origin_tag ?? '',
+    destinationTag: line.destination_tag ?? '',
+    areaPackageZone: line.area_package_zone ?? '',
+    pidReference: line.pid_reference ?? '',
+    isometricDrawingNo: line.isometric_drawing_no ?? '',
+    lineClassSpec: line.line_class_spec ?? '',
+    nominalSizeIn: line.nominal_size_in != null ? String(line.nominal_size_in) : '',
+    scheduleThickness: line.schedule_thickness ?? '',
+    material: line.material ?? '',
+    endConnections: line.end_connections ?? '',
+    flangeRating: line.flange_rating ?? '',
+    designPressurePsig: line.design_pressure_psig != null ? String(line.design_pressure_psig) : '',
+    designTemperatureF: line.design_temperature_f != null ? String(line.design_temperature_f) : '',
+    operatingPressurePsig: line.operating_pressure_psig != null ? String(line.operating_pressure_psig) : '',
+    operatingTemperatureF: line.operating_temperature_f != null ? String(line.operating_temperature_f) : '',
+    corrosionAllowanceIn: line.corrosion_allowance_in != null ? String(line.corrosion_allowance_in) : '',
+    insulationType: line.insulation_type ?? '',
+    insulationThicknessIn: line.insulation_thickness_in != null ? String(line.insulation_thickness_in) : '',
+    heatTracingFlag: line.heat_tracing_flag,
+    heatTracingSpec: line.heat_tracing_spec ?? '',
+    estimatedCenterlineLengthFt: line.estimated_centerline_length_ft != null ? String(line.estimated_centerline_length_ft) : '',
+    specialNotes: line.special_notes ?? '',
+  };
+}
+
+/**
+ * Stage 1: Initial Data Entry (Estimator) — create, or edit an
+ * already-created line before Initial Engineer Confirmation (see the big
+ * comment on `PUT /api/lines/:lineId` in server/routes/lines.ts for why
+ * edit is scoped to stage 1 only).
+ */
 export function CreateLineForm({
   projectId,
   onDone,
+  mode = 'create',
+  lineId,
+  initialLine,
 }: {
   projectId: string;
   onDone: () => void | Promise<void>;
+  mode?: 'create' | 'edit';
+  lineId?: string;
+  initialLine?: LineDetailRow;
 }) {
-  const [form, setForm] = useState<FormState>(EMPTY);
+  const [form, setForm] = useState<FormState>(initialLine ? fromLine(initialLine) : EMPTY);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -85,7 +127,7 @@ export function CreateLineForm({
     setSubmitting(true);
     setError(null);
     try {
-      await api.createLine(projectId, {
+      const body = {
         service: form.service,
         originTag: form.originTag || undefined,
         destinationTag: form.destinationTag || undefined,
@@ -109,7 +151,12 @@ export function CreateLineForm({
         heatTracingSpec: form.heatTracingFlag ? form.heatTracingSpec || undefined : null,
         estimatedCenterlineLengthFt: Number(form.estimatedCenterlineLengthFt),
         specialNotes: form.specialNotes || null,
-      });
+      };
+      if (mode === 'edit' && lineId) {
+        await api.updateLine(lineId, body);
+      } else {
+        await api.createLine(projectId, body);
+      }
       await onDone();
     } catch (e) {
       setError((e as Error).message);
@@ -250,7 +297,9 @@ export function CreateLineForm({
           void handleSubmit();
         }}
       >
-        {submitting ? 'Creating…' : 'Create line (Stage 1)'}
+        {mode === 'edit'
+          ? submitting ? 'Saving…' : 'Save changes'
+          : submitting ? 'Creating…' : 'Create line (Stage 1)'}
       </Button>
     </div>
   );

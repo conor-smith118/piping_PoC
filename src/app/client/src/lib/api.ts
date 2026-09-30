@@ -58,8 +58,46 @@ export interface LineRow {
   latest_event_type: string | null;
 }
 
+// GET /api/lines/:lineId's `line` field is a raw `SELECT * FROM lines` row
+// (server/routes/lines.ts's loadLine) — every column, unlike LineRow above
+// (the Kanban board's narrower query). Needed in full for the edit form to
+// pre-fill every field, not just the ones the Kanban card displays.
+export interface LineDetailRow {
+  line_id: string;
+  project_id: string;
+  line_no: string;
+  service: string | null;
+  origin_tag: string | null;
+  destination_tag: string | null;
+  area_package_zone: string | null;
+  line_class_spec: string | null;
+  nominal_size_in: number | null;
+  schedule_thickness: string | null;
+  material: string | null;
+  design_pressure_psig: number | null;
+  design_temperature_f: number | null;
+  operating_pressure_psig: number | null;
+  operating_temperature_f: number | null;
+  corrosion_allowance_in: number | null;
+  insulation_type: string | null;
+  insulation_thickness_in: number | null;
+  heat_tracing_flag: boolean;
+  heat_tracing_spec: string | null;
+  end_connections: string | null;
+  flange_rating: string | null;
+  pid_reference: string | null;
+  isometric_drawing_no: string | null;
+  estimated_centerline_length_ft: number | null;
+  special_notes: string | null;
+  current_stage: number;
+  is_complete: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface LineDetail {
-  line: LineRow;
+  line: LineDetailRow;
   effectiveRole: Role;
   isOverride: boolean;
   stageHistory: Array<{
@@ -138,6 +176,9 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  updateLine: (lineId: string, body: Record<string, unknown>) =>
+    request<{ lineId: string }>(`/api/lines/${lineId}`, { method: 'PUT', body: JSON.stringify(body) }),
+  deleteLine: (lineId: string) => request<void>(`/api/lines/${lineId}`, { method: 'DELETE' }),
   confirmInitial: (lineId: string, notes?: string) =>
     request<{ lineId: string; currentStage: number }>(`/api/lines/${lineId}/confirm-initial`, {
       method: 'POST',

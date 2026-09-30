@@ -210,6 +210,23 @@ this repo references.
       roles — no `ag` claim, expected and by design, since that's whichever
       session was already authenticated before this feature was ever
       wired in.)
+- [x] Phase 13 — Estimator self-service edit/delete for not-yet-confirmed
+      lines. Real gap: once entered, a line couldn't be corrected or removed
+      even before the Lead Engineer ever looked at it. Added `PUT`/`DELETE
+      /api/lines/:lineId` (`server/routes/lines.ts`), gated to Estimator
+      **and** `current_stage === 1` — scoped there deliberately, since a
+      Lead-Engineer confirmation means "I reviewed this exact data," and
+      silently changing it after that would invalidate the confirmation
+      without re-triggering it (a correction after that point is the Lead
+      Engineer's own job per the stage-action table, not rebuilt here).
+      `CreateLineForm` now supports an edit mode (pre-filled, same fields,
+      `PUT` instead of `POST`); `LineDetailPanel` shows Edit/Delete buttons
+      only when `!is_complete && stage === 1 && effectiveRole === 'Estimator'`,
+      with the delete button behind a confirmation dialog. **Verified live,
+      all 4 cases:** full create→edit→delete round trip as Estimator;
+      edit/delete both correctly 409 once a Lead Engineer has confirmed the
+      line (stage 2); a wrong-role delete attempt correctly 403s ahead of
+      any stage check.
 
 ## Known follow-ups (need your real browser, not just my CLI access)
 

@@ -214,6 +214,37 @@ each, via AppKit's Lakebase pool):
 | 5 | Final True-Up Complete | Design Lead | `INSERT true_up_records` (FINAL) + `INSERT change_log` + `INSERT stage_events` (stage 5) |
 | 6 | Engineer Final Confirmation | Lead Engineer | `UPDATE true_up_records` (confirm FINAL) + `UPDATE lines SET is_complete=true` + `INSERT stage_events` (stage 6) |
 
+### Estimator self-service edit/delete (stage 1 only)
+
+Not in the original 6-action table above — added after real usage surfaced a
+gap: an Estimator who made a data-entry mistake had no way to fix or remove
+it before the Lead Engineer even looked at it. `PUT` / `DELETE
+/api/lines/:lineId` (`server/routes/lines.ts`), gated to `requireRole(...,
+['Estimator'])` **and** `current_stage === 1`, checked in that order (role,
+then stage) so a wrong-role attempt always 403s before a right-role,
+wrong-stage attempt ever reaches the 409.
+
+Stage 1 only, deliberately, not "any stage the Estimator can still see": once
+the Lead Engineer confirms Initial Data Entry (stage ≥ 2), that confirmation
+means "I reviewed and approved this exact data" — silently changing it out
+from under that confirmation afterward would invalidate it without
+re-triggering review. A correction after that point is the Lead Engineer's
+own "optional `UPDATE lines` on correction" from the table above (row 2), not
+an Estimator self-service edit — not built, intentionally out of scope here.
+
+Edit is a plain `UPDATE`, no new `stage_events` row — correcting an
+unconfirmed line is not a new stage action, so the audit trail still shows
+exactly one "Initial Data Entry" event at its original timestamp. Delete
+removes the line's one `stage_events` row before the line itself (satisfies
+the FK; stage 1 is the only stage where no `true_up_records`/`change_log`
+rows can exist yet, so nothing else needs cleanup).
+
+**Verified live**, all 4 cases: full create→edit→delete round trip as
+Estimator (200/204, edit visible on re-fetch, 404 after delete); a
+Lead-Engineer-confirmed (stage 2) line correctly 409s on both edit and
+delete attempts; a wrong-role (Lead Engineer) delete attempt on a stage-1
+line correctly 403s ahead of any stage check.
+
 ## Lakebase → Delta CDC ("Lakehouse Sync", Beta — confirmed mechanism)
 
 This is the **opposite direction** from Lakebase "synced tables" (Delta→Postgres).

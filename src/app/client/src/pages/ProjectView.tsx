@@ -130,7 +130,14 @@ export function ProjectView() {
             />
           )}
           {selectedLineId && (
-            <LineDetailPanel lineId={selectedLineId} onChanged={load} />
+            <LineDetailPanel
+              lineId={selectedLineId}
+              onChanged={load}
+              onDeleted={async () => {
+                setSelectedLineId(null);
+                await load();
+              }}
+            />
           )}
         </SheetContent>
       </Sheet>

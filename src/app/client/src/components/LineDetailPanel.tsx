@@ -9,6 +9,14 @@ import {
   Skeleton,
   Alert,
   Separator,
+  AlertDialog,
+  AlertDialogTrigger,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
 } from '@databricks/appkit-ui/react';
 import { api, type LineDetail, type Role } from '../lib/api';
 import { CreateLineForm } from './forms/CreateLineForm';
@@ -65,13 +73,21 @@ function ConfirmAction({
 export function LineDetailPanel({
   lineId,
   onChanged,
+  onDeleted,
 }: {
   lineId: string;
   onChanged: () => void | Promise<void>;
+  /** Called instead of re-loading this (now-deleted) line — the parent
+   * closes the sheet, since there's nothing left here to show. */
+  onDeleted: () => void | Promise<void>;
 }) {
   const [detail, setDetail] = useState<LineDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -94,6 +110,18 @@ export function LineDetailPanel({
     await onChanged();
   }
 
+  async function handleDelete() {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await api.deleteLine(lineId);
+      await onDeleted();
+    } catch (e) {
+      setDeleteError((e as Error).message);
+      setDeleting(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="p-4 space-y-3">
@@ -111,6 +139,36 @@ export function LineDetailPanel({
   const stage = line.current_stage;
   const requiredRole = STAGE_ROLE[stage];
   const canAct = !line.is_complete && effectiveRole === requiredRole;
+  // Same stage-1-only boundary as the server routes (see the big comment on
+  // PUT /api/lines/:lineId) — an Estimator can correct or remove a line
+  // only before the Lead Engineer has confirmed Initial Data Entry.
+  const canEditOrDelete = !line.is_complete && stage === 1 && effectiveRole === 'Estimator';
+
+  if (editing) {
+    return (
+      <div className="flex flex-col h-full overflow-y-auto">
+        <SheetHeader>
+          <SheetTitle>Edit {line.line_no} — {line.service}</SheetTitle>
+          <SheetDescription>Stage 1 · Estimator</SheetDescription>
+        </SheetHeader>
+        <CreateLineForm
+          mode="edit"
+          lineId={lineId}
+          projectId={line.project_id}
+          initialLine={line}
+          onDone={async () => {
+            setEditing(false);
+            await afterAction();
+          }}
+        />
+        <div className="px-4 pb-4">
+          <Button variant="ghost" className="w-full" onClick={() => setEditing(false)}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full overflow-y-auto">
@@ -127,6 +185,49 @@ export function LineDetailPanel({
           <span className="text-xs text-muted-foreground">Next action: {requiredRole}</span>
         )}
       </div>
+
+      {canEditOrDelete && (
+        <div className="px-4 flex items-center gap-2 mt-3">
+          <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
+            Edit
+          </Button>
+          {/* Controlled (not the uncontrolled Trigger-only pattern) so the
+              dialog stays open on a failed delete to show the error — a
+              plain AlertDialogAction closes on click unconditionally
+              (it's a Radix "confirm and dismiss" primitive), which would
+              silently swallow a failed request with nothing left on screen
+              to show for it. */}
+          <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+            <AlertDialogTrigger asChild>
+              <Button variant="outline" size="sm" className="text-destructive">
+                Delete
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete {line.line_no}?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This permanently removes the line and its Initial Data Entry record. This can only be
+                  done before a Lead Engineer confirms it, and can&apos;t be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              {deleteError && <Alert variant="destructive">{deleteError}</Alert>}
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+                <Button
+                  variant="destructive"
+                  disabled={deleting}
+                  onClick={() => {
+                    void handleDelete();
+                  }}
+                >
+                  {deleting ? 'Deleting…' : 'Delete line'}
+                </Button>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
+      )}
 
       <Separator className="my-4" />
 

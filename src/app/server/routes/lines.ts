@@ -140,6 +140,110 @@ export function registerLineRoutes(appkit: AppKitHandle) {
       }
     });
 
+    // ---- Edit a not-yet-confirmed line (Estimator, stage 1 only) ----
+    // Scoped to stage 1 deliberately: once the Lead Engineer has confirmed
+    // Initial Data Entry (stage >= 2), that confirmation is itself a
+    // statement "I reviewed and approved this exact data" — silently
+    // editing it afterward would invalidate that confirmation without
+    // re-triggering it. Correcting a mistake after that point is a
+    // Lead-Engineer-side "optional UPDATE lines on correction" per
+    // ARCHITECTURE.md's stage-action table, not an Estimator self-service
+    // edit — not built here; out of scope for this fix.
+    app.put('/api/lines/:lineId', async (req, res) => {
+      try {
+        const { lineId } = req.params;
+        const line = await loadLine(appkit, lineId);
+        if (!line) {
+          res.status(404).json({ error: 'Line not found' });
+          return;
+        }
+        const identity = await getRequestIdentity(req);
+        const effective = await getEffectiveRole(appkit, req, identity, line.project_id);
+        if (!effective.role) {
+          res.status(403).json({ error: 'You do not have access to this project.' });
+          return;
+        }
+        if (!requireRole(res, effective, ['Estimator'])) return;
+        if (line.current_stage !== 1) {
+          res.status(409).json({
+            error: `This line is at stage ${line.current_stage} (${STAGE_NAMES[line.current_stage]}) — it can only be edited before Initial Engineer Confirmation.`,
+          });
+          return;
+        }
+        const parsed = CreateLineBody.safeParse(req.body);
+        if (!parsed.success) {
+          res.status(400).json({ error: 'Invalid line data', details: parsed.error.flatten() });
+          return;
+        }
+        const b = parsed.data;
+        // Plain UPDATE, no new stage_events row — editing an unconfirmed
+        // line is a correction, not a new stage action, so the audit trail
+        // still shows exactly one "Initial Data Entry" event at its
+        // original timestamp.
+        await appkit.lakebase.query(
+          `UPDATE lines SET
+             service = $1, origin_tag = $2, destination_tag = $3, area_package_zone = $4, line_class_spec = $5,
+             nominal_size_in = $6, schedule_thickness = $7, material = $8, design_pressure_psig = $9,
+             design_temperature_f = $10, operating_pressure_psig = $11, operating_temperature_f = $12,
+             corrosion_allowance_in = $13, insulation_type = $14, insulation_thickness_in = $15,
+             heat_tracing_flag = $16, heat_tracing_spec = $17, end_connections = $18, flange_rating = $19,
+             pid_reference = $20, isometric_drawing_no = $21, estimated_centerline_length_ft = $22,
+             special_notes = $23, updated_at = NOW()
+           WHERE line_id = $24`,
+          [
+            b.service, b.originTag ?? null, b.destinationTag ?? null, b.areaPackageZone ?? null, b.lineClassSpec,
+            b.nominalSizeIn, b.scheduleThickness ?? null, b.material, b.designPressurePsig ?? null,
+            b.designTemperatureF ?? null, b.operatingPressurePsig ?? null, b.operatingTemperatureF ?? null,
+            b.corrosionAllowanceIn ?? null, b.insulationType ?? null, b.insulationThicknessIn ?? null,
+            b.heatTracingFlag ?? false, b.heatTracingSpec ?? null, b.endConnections ?? null, b.flangeRating ?? null,
+            b.pidReference ?? null, b.isometricDrawingNo ?? null, b.estimatedCenterlineLengthFt, b.specialNotes ?? null,
+            lineId,
+          ],
+        );
+        res.json({ lineId });
+      } catch (err) {
+        console.error('PUT /api/lines/:lineId failed:', err);
+        res.status(500).json({ error: 'Failed to update line' });
+      }
+    });
+
+    // ---- Delete a not-yet-confirmed line (Estimator, stage 1 only) ----
+    // Same stage-1-only boundary as edit, for the same reason. Deletes the
+    // line's single stage_events row (the original Initial Data Entry
+    // event — stage 1 is the only stage where no true_up_records/change_log
+    // rows can exist yet) before the line itself, satisfying the FK.
+    app.delete('/api/lines/:lineId', async (req, res) => {
+      try {
+        const { lineId } = req.params;
+        const line = await loadLine(appkit, lineId);
+        if (!line) {
+          res.status(404).json({ error: 'Line not found' });
+          return;
+        }
+        const identity = await getRequestIdentity(req);
+        const effective = await getEffectiveRole(appkit, req, identity, line.project_id);
+        if (!effective.role) {
+          res.status(403).json({ error: 'You do not have access to this project.' });
+          return;
+        }
+        if (!requireRole(res, effective, ['Estimator'])) return;
+        if (line.current_stage !== 1) {
+          res.status(409).json({
+            error: `This line is at stage ${line.current_stage} (${STAGE_NAMES[line.current_stage]}) — it can only be deleted before Initial Engineer Confirmation.`,
+          });
+          return;
+        }
+        await withTransaction(appkit, async (client) => {
+          await client.query('DELETE FROM stage_events WHERE line_id = $1', [lineId]);
+          await client.query('DELETE FROM lines WHERE line_id = $1', [lineId]);
+        });
+        res.status(204).end();
+      } catch (err) {
+        console.error('DELETE /api/lines/:lineId failed:', err);
+        res.status(500).json({ error: 'Failed to delete line' });
+      }
+    });
+
     // ---- Stage 1: Initial Data Entry (Estimator) ----
     app.post('/api/projects/:projectId/lines', async (req, res) => {
       try {
