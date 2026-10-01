@@ -57,7 +57,7 @@ piping_PoC/
 │   │   ├── build_agent_config.py           # generates the 5 .geniespace.json below
 │   │   └── <project>.geniespace.json
 │   ├── sql/
-│   │   ├── ddl/01-05_*.sql                 # live/historical/union-views/gold/genie-views
+│   │   ├── ddl/01-06_*.sql                 # live/historical/union-views/gold/genie-views/cdc-comments
 │   │   └── lakebase/{00_schema, 01_grant_app_access, seed_live_data}.sql
 │   └── notebooks/
 │       ├── synthetic/{generate_historical_projects, generate_live_seed}.py
@@ -80,6 +80,22 @@ piping_PoC/
 | Union | `v_projects`, `v_lines`, `v_stage_history`, `v_true_up_records`, `v_change_log` | Views unioning live + historical with a `data_origin` column — see "Data freshness" below for how the live half is actually computed |
 | Gold | `gold_line_status`, `gold_project_rollup` | Views over the union views — see "Data freshness" |
 | ML | `ml_stage_transition_features`, `gold_ml_predictions` | Physical Delta tables, batch-built by the ML notebooks |
+
+### Table and column comments
+
+Every table and view in the catalog carries a `COMMENT` — on the object
+itself and on every one of its columns — applied via inline `COMMENT`
+clauses directly in the DDL files (`src/sql/ddl/01`-`06_*.sql`), so a fresh
+deploy is fully self-documenting with no separate backfill step. `v_*`/
+`gold_*` views carry their own full column comments rather than relying on
+lineage back to `live_*`/`historical_*`, since Genie and UC search both read
+a column's comment on the exact object being queried, not an upstream one.
+The only columns without comments are the `lb_*_history` CDC landing
+tables' own Lakehouse Sync technical metadata (`_pg_change_type`/`_pg_lsn`/
+`_pg_xid`/`_timestamp`/`_sort_by`) and their business columns (already fully
+commented one hop downstream, on `live_*` and the `v_*` views that read
+them) — those 6 tables still get a table-level `COMMENT` (`06_cdc_landing_
+table_comments.sql`).
 
 **Column-level grain** (real S3D/P&ID/line-list vocabulary, not generic
 placeholders):

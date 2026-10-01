@@ -60,6 +60,10 @@ schema away from the literal name every other resource in this repo references.
 - **Account-level RBAC** — role groups support Databricks' native
   "assume role" login flow, so a single test identity can genuinely
   experience each restricted role, not just via an in-app switcher.
+- **Fully commented Unity Catalog** — every table/view and column carries a
+  `COMMENT`, applied inline in the DDL itself (`src/sql/ddl/01`-`06_*.sql`),
+  so Genie and UC search both resolve real column semantics rather than
+  guessing from column names.
 - **Admin console** — manage per-project role assignments without touching
   workspace/account identity management.
 - **Simulate/reset jobs** — `simulate_new_data` (writes through the real

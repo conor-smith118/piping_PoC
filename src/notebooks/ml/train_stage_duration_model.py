@@ -245,8 +245,12 @@ from pyspark.sql import functions as F
 
 spark.sql(f"""
 CREATE TABLE IF NOT EXISTS {CATALOG}.{SCHEMA}._ml_model_metadata (
-  model_name STRING, key STRING, value STRING, updated_at TIMESTAMP
+  model_name STRING COMMENT 'UC Model Registry model name this metadata row belongs to (e.g. css_fevm.burns_piping_poc.stage_duration_model).',
+  key STRING COMMENT 'Metadata key, e.g. feature_columns.',
+  value STRING COMMENT 'Metadata value. For key=feature_columns: a JSON array of the exact one-hot-encoded column order used at training time, which batch_score_predictions.py must reproduce identically at scoring time.',
+  updated_at TIMESTAMP COMMENT 'Timestamp this metadata row was written (each training run deletes and re-inserts its model''s row).'
 ) USING DELTA
+COMMENT 'Small internal config table (not line/project data) persisting training-time artifacts — currently just the one-hot feature-column order — that batch inference must reproduce exactly. Intentionally excluded from ARCHITECTURE.md''s table inventory as it is config, not a data table.'
 """)
 spark.sql(
     f"DELETE FROM {CATALOG}.{SCHEMA}._ml_model_metadata "
