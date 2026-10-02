@@ -1,0 +1,24 @@
+resources:
+  jobs:
+    apply_catalog_schema_ddl:
+      name: "Piping PoC — Apply Catalog/Schema DDL (one-time setup)"
+      description: >-
+        One-time setup job: runs src/sql/ddl/01-06_*.sql (tables, union views,
+        gold views, Genie per-project views, CDC table comments) against this
+        bundle's catalog/schema. Run once after Lakebase schema/CDC setup and
+        before synthetic_historical_seed/the live-data seed (see SETUP.md) —
+        the v_*/gold_* views in 03/04 reference the lb_*_history CDC landing
+        tables, which must already exist. Safe to re-run any time after that
+        too; every statement in 01-06 is idempotent.
+      tasks:
+        - task_key: apply_ddl
+          notebook_task:
+            notebook_path: ../src/notebooks/setup/apply_catalog_schema_ddl.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              # ${workspace.file_path} is this bundle's synced workspace root
+              # (a DABs built-in) — resolved at deploy time, so the notebook
+              # never has to guess its own sibling files' absolute path.
+              ddl_dir: ${workspace.file_path}/src/sql/ddl
+          # no cluster config -> serverless

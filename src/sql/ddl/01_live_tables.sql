@@ -18,8 +18,14 @@
 -- existing tables via ALTER TABLE ... ALTER COLUMN ... COMMENT (run once,
 -- not a repo file — a fresh deploy gets them for free from this file alone).
 -- ============================================================================
+--
+-- NOTE: all object names below are bare (not catalog.schema-qualified) --
+-- run `USE CATALOG <catalog>; USE SCHEMA <schema>;` first (or let the
+-- apply_catalog_schema_ddl job do it for you; see SETUP.md). This is what
+-- makes this file portable to any catalog/schema with zero find-and-replace.
+-- ============================================================================
 
-CREATE TABLE IF NOT EXISTS css_fevm.burns_piping_poc.live_projects (
+CREATE TABLE IF NOT EXISTS live_projects (
   project_id            STRING  NOT NULL COMMENT 'Unique project identifier (e.g. BM-L-001). Primary key.',
   project_name          STRING  COMMENT 'Human-readable project name.',
   client_name           STRING  COMMENT 'End client the project is being executed for.',
@@ -32,7 +38,7 @@ CREATE TABLE IF NOT EXISTS css_fevm.burns_piping_poc.live_projects (
 ) USING DELTA
 COMMENT 'Live piping projects, CDC''d from Lakebase (5 to start).';
 
-CREATE TABLE IF NOT EXISTS css_fevm.burns_piping_poc.live_lines (
+CREATE TABLE IF NOT EXISTS live_lines (
   line_id                         STRING  NOT NULL COMMENT 'Unique piping line identifier. Primary key.',
   project_id                      STRING  COMMENT 'Project this line belongs to. Foreign key to live_projects.project_id.',
   line_no                         STRING  COMMENT 'Line-list number as shown on the P&ID/isometric (e.g. L-001).',
@@ -67,7 +73,7 @@ CREATE TABLE IF NOT EXISTS css_fevm.burns_piping_poc.live_lines (
 ) USING DELTA
 COMMENT 'Live line-list master record, current snapshot per line, CDC''d from Lakebase.';
 
-CREATE TABLE IF NOT EXISTS css_fevm.burns_piping_poc.live_stage_history (
+CREATE TABLE IF NOT EXISTS live_stage_history (
   event_id          STRING  NOT NULL COMMENT 'Unique stage-event identifier. Primary key.',
   line_id           STRING  COMMENT 'Line this event belongs to. Foreign key to live_lines.line_id.',
   project_id        STRING  COMMENT 'Project this event belongs to (denormalized for convenient filtering).',
@@ -81,7 +87,7 @@ CREATE TABLE IF NOT EXISTS css_fevm.burns_piping_poc.live_stage_history (
 ) USING DELTA
 COMMENT 'Append-only audit/confirmation log of every stage transition, CDC''d from Lakebase.';
 
-CREATE TABLE IF NOT EXISTS css_fevm.burns_piping_poc.live_true_up_records (
+CREATE TABLE IF NOT EXISTS live_true_up_records (
   true_up_id                       STRING  NOT NULL COMMENT 'Unique true-up record identifier. Primary key.',
   line_id                          STRING  COMMENT 'Line this true-up applies to. Foreign key to live_lines.line_id.',
   project_id                       STRING  COMMENT 'Project this true-up belongs to (denormalized for convenient filtering).',
@@ -109,7 +115,7 @@ CREATE TABLE IF NOT EXISTS css_fevm.burns_piping_poc.live_true_up_records (
 ) USING DELTA
 COMMENT 'Baseline-vs-actual true-up reconciliation, CDC''d from Lakebase.';
 
-CREATE TABLE IF NOT EXISTS css_fevm.burns_piping_poc.live_change_log (
+CREATE TABLE IF NOT EXISTS live_change_log (
   change_id         STRING  NOT NULL COMMENT 'Unique change-log entry identifier. Primary key.',
   true_up_id        STRING  COMMENT 'True-up record this change explains. Foreign key to live_true_up_records.true_up_id.',
   line_id           STRING  COMMENT 'Line this change applies to (denormalized for convenient filtering).',
@@ -120,7 +126,7 @@ CREATE TABLE IF NOT EXISTS css_fevm.burns_piping_poc.live_change_log (
 ) USING DELTA
 COMMENT 'Reconciliation change/reason entries per true-up, CDC''d from Lakebase.';
 
-CREATE TABLE IF NOT EXISTS css_fevm.burns_piping_poc.live_user_project_role (
+CREATE TABLE IF NOT EXISTS live_user_project_role (
   user_email    STRING  NOT NULL COMMENT 'Email of the user granted this role.',
   project_id    STRING  NOT NULL COMMENT 'Project the role grant applies to. Foreign key to live_projects.project_id.',
   role          STRING  COMMENT 'Granted role: Estimator | Lead Engineer | Design Lead | Admin.',

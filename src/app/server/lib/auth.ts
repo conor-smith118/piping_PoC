@@ -23,9 +23,16 @@
 // ("assumed group") claim with that role's backing group ID — found by
 // direct empirical testing, documented in ARCHITECTURE.md. When present, it
 // takes priority over the full SCIM group list, narrowing this request's
-// identity to just that one assumed role.
+// identity to just that one assumed role. The ID is resolved to a display
+// name by matching it against the SAME SCIM `Me` call's `groups[].value`
+// field (confirmed directly against a live workspace: SCIM `Me` returns
+// `{display, value, $ref}` per group, and `value` is exactly the same
+// numeric-string ID format as the `ag` claim) — deliberately NOT a
+// hardcoded, account-specific ID->name table, since a caller can only ever
+// assume a group they are themselves a member of, which SCIM `Me` always
+// includes. This makes the whole mechanism portable to any account's groups
+// with zero config.
 import type { Request } from 'express';
-import { GROUP_ID_TO_NAME } from './roles';
 
 export interface RequestIdentity {
   email: string;
@@ -35,12 +42,20 @@ export interface RequestIdentity {
 }
 
 // Local dev only: no reverse proxy, so no forwarded headers exist. Mirrors
-// conor.smith's real membership (all 4 groups) so local testing can exercise
-// every role via the same "view as" switcher used in the deployed app.
-const DEV_FALLBACK_EMAIL = 'conor.smith@databricks.com';
+// membership in all 4 role groups so local testing can exercise every role
+// via the same "view as" switcher used in the deployed app. Harmless to
+// leave as-is for any deployment — this path is never reachable once the
+// app runs behind the real Databricks Apps proxy (see the !email/!accessToken
+// check below), which always forwards both headers.
+const DEV_FALLBACK_EMAIL = 'dev.fallback@example.com';
 const DEV_FALLBACK_GROUPS = ['Estimator Piping', 'Lead Engineer Piping', 'Design Lead Piping', 'Admin Piping'];
 
-const groupsCache = new Map<string, { groups: string[]; expiresAt: number }>();
+interface ScimGroup {
+  id: string;
+  display: string;
+}
+
+const groupsCache = new Map<string, { groups: ScimGroup[]; expiresAt: number }>();
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
 /** Decodes a JWT's payload segment without verifying its signature — safe
@@ -62,7 +77,7 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
   }
 }
 
-async function fetchGroupsFromScim(accessToken: string): Promise<string[]> {
+async function fetchGroupsFromScim(accessToken: string): Promise<ScimGroup[]> {
   const rawHost = process.env.DATABRICKS_HOST;
   if (!rawHost) {
     console.warn('[auth] DATABRICKS_HOST not set; cannot resolve group membership');
@@ -81,8 +96,31 @@ async function fetchGroupsFromScim(accessToken: string): Promise<string[]> {
     console.warn(`[auth] SCIM Me lookup failed: ${resp.status} ${resp.statusText}`);
     return [];
   }
-  const data = (await resp.json()) as { groups?: { display?: string }[] };
-  return (data.groups ?? []).map((g) => g.display).filter((d): d is string => !!d);
+  const data = (await resp.json()) as { groups?: { display?: string; value?: string }[] };
+  return (data.groups ?? [])
+    .filter((g): g is { display: string; value: string } => !!g.display && !!g.value)
+    .map((g) => ({ id: g.value, display: g.display }));
+}
+
+async function getGroupsCached(accessToken: string): Promise<ScimGroup[]> {
+  const cached = groupsCache.get(accessToken);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.groups;
+  }
+  // A transient SCIM/network failure should degrade to "no groups" (the user
+  // sees no access, gets a clear 403 downstream) rather than crash the
+  // request — or worse, the whole process, if some caller forgets a
+  // try/catch of its own. Every route handler still has its own try/catch
+  // (defense in depth), but this is the one place literally every request
+  // passes through, so it gets the strictest guarantee.
+  let groups: ScimGroup[] = [];
+  try {
+    groups = await fetchGroupsFromScim(accessToken);
+  } catch (err) {
+    console.error('[auth] Failed to resolve group membership:', err);
+  }
+  groupsCache.set(accessToken, { groups, expiresAt: Date.now() + CACHE_TTL_MS });
+  return groups;
 }
 
 /**
@@ -99,32 +137,20 @@ export async function getRequestIdentity(req: Request): Promise<RequestIdentity>
   }
 
   const assumedGroupId = decodeJwtPayload(accessToken)?.ag;
-  const assumedGroupName = typeof assumedGroupId === 'string' ? GROUP_ID_TO_NAME[assumedGroupId] : undefined;
-  if (assumedGroupName) {
-    // No SCIM call needed (or wanted) here — narrowing to exactly the
-    // assumed role is the whole point, and a fresh role-selection login
-    // always mints a distinct token anyway, so there's no cross-request
-    // caching benefit to reusing the SCIM fetch path for this case.
-    return { email, groups: [assumedGroupName], isDevFallback: false };
+  const scimGroups = await getGroupsCached(accessToken);
+
+  if (typeof assumedGroupId === 'string') {
+    const assumed = scimGroups.find((g) => g.id === assumedGroupId);
+    if (assumed) {
+      // Narrow to exactly the assumed role, regardless of how many groups
+      // this account is a member of — the whole point of "assume role".
+      return { email, groups: [assumed.display], isDevFallback: false };
+    }
+    // `ag` present but not found in this user's own SCIM group list should
+    // not happen (Databricks only issues `ag` for a group the caller is
+    // already a member of) — fall through to the full list rather than
+    // silently granting zero access on an unexpected mismatch.
   }
 
-  const cached = groupsCache.get(accessToken);
-  if (cached && cached.expiresAt > Date.now()) {
-    return { email, groups: cached.groups, isDevFallback: false };
-  }
-
-  // A transient SCIM/network failure should degrade to "no groups" (the user
-  // sees no access, gets a clear 403 downstream) rather than crash the
-  // request — or worse, the whole process, if some caller forgets a
-  // try/catch of its own. Every route handler still has its own try/catch
-  // (defense in depth), but this is the one place literally every request
-  // passes through, so it gets the strictest guarantee.
-  let groups: string[] = [];
-  try {
-    groups = await fetchGroupsFromScim(accessToken);
-  } catch (err) {
-    console.error('[auth] Failed to resolve group membership:', err);
-  }
-  groupsCache.set(accessToken, { groups, expiresAt: Date.now() + CACHE_TTL_MS });
-  return { email, groups, isDevFallback: false };
+  return { email, groups: scimGroups.map((g) => g.display), isDevFallback: false };
 }

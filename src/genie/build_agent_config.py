@@ -1,6 +1,7 @@
 """Builds the serialized_space JSON for one project's Genie agent.
 
 Usage: python3 build_agent_config.py BM-L-001 > BM-L-001.geniespace.json
+       python3 build_agent_config.py BM-L-001 --catalog my_cat --schema my_schema > ...
 
 Designed once (against BM-L-001, discover-schema'd + validated via CLI),
 then templated across all 5 live projects by this script — only the
@@ -13,13 +14,20 @@ IDs are deterministic (uuid5 keyed off project_id + a stable label) so
 re-running this script for the same project doesn't need a diff to see
 what changed, and so ids stay unique across the 5 agents in case they're
 ever combined/compared.
+
+--catalog/--schema default to this reference deployment's values. If you're
+deploying under a different catalog/schema (see SETUP.md), pass them here —
+the fully-qualified view identifiers below get baked directly into the
+checked-in *.geniespace.json files (Genie space JSON isn't processed by
+DABs variable substitution, same reason the dashboard IDs in app.yaml are
+plain literals, not ${resources...} references), so this script must be
+re-run (for all 5 projects) and its output re-committed whenever the
+catalog/schema changes.
 """
+import argparse
 import json
-import sys
 import uuid
 
-CATALOG = "css_fevm"
-SCHEMA = "burns_piping_poc"
 NAMESPACE = uuid.UUID("6f6e6531-6c69-6e65-706f-632067656e69")  # arbitrary fixed namespace
 
 
@@ -32,12 +40,12 @@ def view_suffix(project_id: str) -> str:
     return project_id.lower().replace("-", "_")
 
 
-def build(project_id: str) -> dict:
+def build(project_id: str, catalog: str, schema: str) -> dict:
     suf = view_suffix(project_id)
-    lines_view = f"{CATALOG}.{SCHEMA}.vw_genie_{suf}_lines"
-    history_view = f"{CATALOG}.{SCHEMA}.vw_genie_{suf}_stage_history"
-    trueup_view = f"{CATALOG}.{SCHEMA}.vw_genie_{suf}_true_up"
-    pred_view = f"{CATALOG}.{SCHEMA}.vw_genie_{suf}_predictions"
+    lines_view = f"{catalog}.{schema}.vw_genie_{suf}_lines"
+    history_view = f"{catalog}.{schema}.vw_genie_{suf}_stage_history"
+    trueup_view = f"{catalog}.{schema}.vw_genie_{suf}_true_up"
+    pred_view = f"{catalog}.{schema}.vw_genie_{suf}_predictions"
     # FROM/JOIN clauses use the fully-qualified identifier throughout — this
     # skill's own documented example (create-genie-agent.md) qualifies
     # example_question_sqls this way (`FROM catalog.ops.gold_otp_summary`),
@@ -292,5 +300,9 @@ def build(project_id: str) -> dict:
 
 
 if __name__ == "__main__":
-    project_id = sys.argv[1]
-    print(json.dumps(build(project_id), indent=2))
+    parser = argparse.ArgumentParser()
+    parser.add_argument("project_id")
+    parser.add_argument("--catalog", default="css_fevm")
+    parser.add_argument("--schema", default="burns_piping_poc")
+    args = parser.parse_args()
+    print(json.dumps(build(args.project_id, args.catalog, args.schema), indent=2))

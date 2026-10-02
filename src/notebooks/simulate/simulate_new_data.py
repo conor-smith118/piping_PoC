@@ -52,10 +52,14 @@ w = WorkspaceClient()
 # Connection (Scripts/Notebooks)") — a fresh token for a one-shot batch job,
 # no refresh loop needed (well within the 1-hour token lifetime). Runs as
 # whichever identity owns/triggers this job (no run_as override configured,
-# same as the other jobs in this repo) — that's conor.smith, who created the
-# Lakebase project and therefore already owns the `public` schema, so no
+# same as the other jobs in this repo) — on this reference deployment that's
+# whoever ran `databricks bundle deploy` (the identity that created the
+# Lakebase project), who therefore already owns the `public` schema, so no
 # additional GRANT is needed here (unlike the app's service principal, which
-# needed src/sql/lakebase/01_grant_app_access.sql).
+# needed src/sql/lakebase/01_grant_app_access.sql). If a different identity
+# deploys the bundle than the one that created the Lakebase project, grant
+# that deploying identity the same access 01_grant_app_access.sql grants the
+# app's SP (see SETUP.md).
 endpoint = w.postgres.get_endpoint(name=ENDPOINT_PATH)
 host = endpoint.status.hosts.host
 token = w.postgres.generate_database_credential(endpoint=endpoint.name).token

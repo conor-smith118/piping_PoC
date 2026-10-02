@@ -161,11 +161,14 @@ from sklearn.metrics import mean_absolute_error, r2_score
 
 mlflow.set_registry_uri("databricks-uc")
 
-# set_experiment does NOT auto-create the parent folder — pre-create it.
-EXPERIMENT_DIR = "/Users/conor.smith@databricks.com/burns_piping_poc"
 from databricks.sdk import WorkspaceClient
 
-WorkspaceClient().workspace.mkdirs(EXPERIMENT_DIR)
+w = WorkspaceClient()
+# Resolved dynamically (not a hardcoded path) so this notebook works
+# unmodified under whichever identity runs it, in any workspace.
+EXPERIMENT_DIR = f"/Users/{w.current_user.me().user_name}/burns_piping_poc"
+# set_experiment does NOT auto-create the parent folder — pre-create it.
+w.workspace.mkdirs(EXPERIMENT_DIR)
 mlflow.set_experiment(f"{EXPERIMENT_DIR}/stage_duration_model")
 
 MODEL_NAME = f"{CATALOG}.{SCHEMA}.stage_duration_model"

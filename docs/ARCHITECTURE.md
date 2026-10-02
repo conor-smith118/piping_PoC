@@ -13,6 +13,14 @@ predicting stage durations — all scoped per project.
 
 ## Environment
 
+**Deploying this into a new workspace/account?** See `SETUP.md` at the repo
+root for the full from-scratch sequence. The table below is this reference
+deployment's actual values, given as a worked example — every one of them
+is a bundle variable or a one-time setup choice, not hardcoded into
+application code (confirmed: no catalog/schema/workspace-path/account-group-ID
+literal survives outside `databricks.yml`'s variable *defaults* and this
+documentation).
+
 | Item | Value |
 |---|---|
 | Databricks profile | `fevm-css-demo` |
@@ -58,16 +66,34 @@ piping_PoC/
 │   │   └── <project>.geniespace.json
 │   ├── sql/
 │   │   ├── ddl/01-06_*.sql                 # live/historical/union-views/gold/genie-views/cdc-comments
+│   │   │                                   # (bare object names — see "Catalog/schema portability" below)
 │   │   └── lakebase/{00_schema, 01_grant_app_access, seed_live_data}.sql
 │   └── notebooks/
+│       ├── setup/apply_catalog_schema_ddl.py  # one-time: runs sql/ddl/01-06 against this bundle's catalog/schema
 │       ├── synthetic/{generate_historical_projects, generate_live_seed}.py
 │       ├── etl/refresh_silver_gold.py
 │       ├── simulate/simulate_new_data.py
 │       ├── reset/reset_poc.py
 │       └── ml/{train_stage_duration_model, batch_score_predictions}.py
 ├── docs/{ARCHITECTURE.md, DEMO_SCRIPT.md}
+├── SETUP.md
 └── README.md
 ```
+
+### Catalog/schema portability
+
+`src/sql/ddl/01`-`06_*.sql` use bare object names throughout (`live_lines`,
+not `css_fevm.burns_piping_poc.live_lines`) — portable to any catalog/schema
+with zero find-and-replace, as long as `USE CATALOG`/`USE SCHEMA` run first
+in the same session. `apply_catalog_schema_ddl` (job + notebook) is exactly
+that: it takes `catalog`/`schema` as parameters (wired from
+`${var.catalog}`/`${var.schema}`), issues the two `USE` statements, then
+runs every statement in all 6 files in one Spark session via
+`${workspace.file_path}/src/sql/ddl` (a DABs built-in resolved at deploy
+time, so the notebook never has to guess its own sibling files' path).
+`databricks bundle run apply_catalog_schema_ddl` is the one command that
+replaces what would otherwise be 6 files' worth of manual CLI SQL execution
+with manual catalog/schema substitution.
 
 ## Data architecture
 
@@ -249,11 +275,17 @@ a user select/assume a specific role at login (Databricks' native RBAC
 "assume role" feature) rather than always authenticating as themselves and
 relying on the in-app switcher. When a caller goes through a fresh OAuth
 authorization flow and picks a role during it, the resulting forwarded
-access token's JWT carries an `ag` claim with that role's backing group ID.
-`getRequestIdentity` decodes this directly and, when present, narrows the
-caller's groups to exactly that one role for the request — bypassing the
-full-membership SCIM lookup entirely, since Databricks itself only issues
-`ag` after checking Assume permission.
+access token's JWT carries an `ag` claim with that role's backing group ID
+(a numeric string, e.g. `"153366456771408"` — not a display name).
+`getRequestIdentity` decodes this directly and, when present, resolves it to
+a display name by matching it against the SAME SCIM `Me` call's
+`groups[].value` field (SCIM `Me` returns `{display, value, $ref}` per
+group, and `value` is exactly the same numeric-string format as `ag`) —
+**not** a hardcoded, account-specific ID-to-name table, since a caller can
+only ever assume a group they are themselves already a member of, which
+SCIM `Me` always includes. This is what makes the mechanism portable to any
+account's groups with zero config: there is nothing account-specific to set
+up beyond creating the 4 groups themselves (see `SETUP.md`).
 
 This claim only appears via a genuinely fresh authorization exchange (e.g.
 an incognito window, or explicitly signing out first) — an already

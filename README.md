@@ -11,7 +11,13 @@ agent per project, and an ML model predicting stage-transition durations.
 See `docs/ARCHITECTURE.md` for the full technical design and
 `docs/DEMO_SCRIPT.md` for a live walkthrough script.
 
-## Environment
+**Deploying this into a new workspace/account? Start with `SETUP.md`** —
+it's a from-scratch, step-by-step guide (account groups, Lakebase, CDC,
+bundle deploy, seed data, in order). Everything below assumes that's
+already done; it documents *this* reference deployment's specific values as
+a worked example, not placeholders to copy literally.
+
+## Environment (this reference deployment's values)
 
 | Item | Value |
 |---|---|
@@ -24,12 +30,16 @@ See `docs/ARCHITECTURE.md` for the full technical design and
 | Live projects | `BM-L-001` .. `BM-L-005` (5 active projects, ~93 lines at baseline) |
 | Historical projects | 25 closed projects (~882 lines), synthetic ML training data |
 
-## Deploying
+All of the above are bundle variables (`databricks.yml`) or one-time setup
+choices (account group names, Lakebase project name) — none are hardcoded
+into application code. See `SETUP.md` to deploy under your own values.
+
+## Deploying (code changes, after initial setup)
 
 ```bash
-databricks bundle validate --strict -t dev --profile fevm-css-demo
-databricks bundle deploy -t dev --profile fevm-css-demo
-databricks apps deploy burns-piping-poc --profile fevm-css-demo   # picks up app code changes; bundle deploy alone does not restart the app
+databricks bundle validate --strict -t dev --profile <yours>
+databricks bundle deploy -t dev --profile <yours>
+databricks apps deploy <your-app-name> --profile <yours>   # picks up app code changes; bundle deploy alone does not restart the app
 ```
 
 The bundle's `dev` target uses `mode: production` (not `development`) deliberately —
@@ -59,7 +69,10 @@ schema away from the literal name every other resource in this repo references.
   predictions feed the Kanban ETA column, dashboard KPI, and Genie.
 - **Account-level RBAC** — role groups support Databricks' native
   "assume role" login flow, so a single test identity can genuinely
-  experience each restricted role, not just via an in-app switcher.
+  experience each restricted role, not just via an in-app switcher. The
+  assumed group's ID is resolved to a role via a live SCIM lookup, not a
+  hardcoded account-specific ID table — portable to any account's groups
+  with zero config.
 - **Fully commented Unity Catalog** — every table/view and column carries a
   `COMMENT`, applied inline in the DDL itself (`src/sql/ddl/01`-`06_*.sql`),
   so Genie and UC search both resolve real column semantics rather than
@@ -94,7 +107,7 @@ schema away from the literal name every other resource in this repo references.
      conversation API, my own CLI), not yet clicked through in a browser.
 4. **Republishing a dashboard** after editing its `.lvdash.json` requires
    both `databricks bundle deploy` (updates the draft) and
-   `databricks lakeview publish <id> --warehouse-id a4e59a1f13ab8b9a
+   `databricks lakeview publish <id> --warehouse-id <your-warehouse-id>
    --embed-credentials` (publishes it) — for all 5 dashboards if the shared
    template (`build_dashboard_config.py`) changes.
 5. **No project create/edit in `/admin`** — the 5 live projects are each

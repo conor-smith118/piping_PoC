@@ -2,22 +2,30 @@ command: ['npm', 'run', 'start']
 env:
   - name: LAKEBASE_ENDPOINT
     valueFrom: postgres
-  # One dashboard per project now (Option B — see
-  # docs/ARCHITECTURE.md), each natively linked to its own project's Genie
-  # agent via that dashboard's own uiSettings.genieSpace.overrideId. Plain
-  # literals, not permission-bearing resources — there's no AppKit
-  # "dashboard" resource type (see server/routes/config.ts). Placeholder
-  # values below get overwritten with the real ids once the 5 dashboards in
-  # resources/dashboards/*.dashboard.yml are deployed for the first time
-  # (`databricks bundle summary` or `databricks lakeview list` to read them
-  # back).
+  # One dashboard per project (see docs/ARCHITECTURE.md), each natively
+  # linked to its own project's Genie agent via that dashboard's own
+  # uiSettings.genieSpace.overrideId. Plain literals, not permission-bearing
+  # resources — there's no AppKit "dashboard" resource type (see
+  # server/routes/config.ts), and a dashboard's own id isn't knowable until
+  # after it's been deployed at least once, so it can't be a
+  # `${resources.dashboards....id}` bundle substitution either.
+  #
+  # REQUIRED SETUP STEP (see SETUP.md): deploy the 5 dashboards in
+  # resources/dashboards/*.dashboard.yml first (`databricks bundle deploy`),
+  # then read back their real ids (`databricks lakeview list --profile
+  # <yours>` or `databricks bundle summary`) and replace the 5 placeholder
+  # values below with them, then `databricks apps deploy` again. Until you
+  # do, each project's dashboard tab will try to embed a dashboard that
+  # doesn't exist and show a broken iframe — a clear, loud signal that this
+  # step hasn't been done yet, by design (see server/routes/config.ts's
+  # `embedBaseUrl` logic) rather than a silently-wrong one.
   - name: DASHBOARD_ID_BM_L_001
-    value: '01f1bc2d96af1c5d89b8da06e2ba6785'
+    value: 'REPLACE_WITH_REAL_DASHBOARD_ID_AFTER_FIRST_DEPLOY'
   - name: DASHBOARD_ID_BM_L_002
-    value: '01f1bc2d96ba1bceabffb8402ec8fb3c'
+    value: 'REPLACE_WITH_REAL_DASHBOARD_ID_AFTER_FIRST_DEPLOY'
   - name: DASHBOARD_ID_BM_L_003
-    value: '01f1bc2d96b91b408024f87ba463ccf7'
+    value: 'REPLACE_WITH_REAL_DASHBOARD_ID_AFTER_FIRST_DEPLOY'
   - name: DASHBOARD_ID_BM_L_004
-    value: '01f1bc2d96ba1c8387ea2175f5b1f8a8'
+    value: 'REPLACE_WITH_REAL_DASHBOARD_ID_AFTER_FIRST_DEPLOY'
   - name: DASHBOARD_ID_BM_L_005
-    value: '01f1bc2d96ce169f9c69b985af48289c'
+    value: 'REPLACE_WITH_REAL_DASHBOARD_ID_AFTER_FIRST_DEPLOY'

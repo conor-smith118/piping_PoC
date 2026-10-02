@@ -20,83 +20,89 @@
 -- v_change_log, gold_ml_predictions — see 03_union_views.sql/
 -- 04_gold_tables.sql), so Genie resolves column semantics from there.
 -- ============================================================================
+--
+-- NOTE: all object names below are bare (not catalog.schema-qualified) --
+-- run `USE CATALOG <catalog>; USE SCHEMA <schema>;` first (or let the
+-- apply_catalog_schema_ddl job do it for you; see SETUP.md). This is what
+-- makes this file portable to any catalog/schema with zero find-and-replace.
+-- ============================================================================
 
-CREATE OR REPLACE VIEW css_fevm.burns_piping_poc.vw_genie_bm_l_001_lines
+CREATE OR REPLACE VIEW vw_genie_bm_l_001_lines
 COMMENT 'Genie-scoped lines view for project BM-L-001 — gold_line_status filtered to this project only.'
-AS SELECT * FROM css_fevm.burns_piping_poc.gold_line_status WHERE project_id = 'BM-L-001';
-CREATE OR REPLACE VIEW css_fevm.burns_piping_poc.vw_genie_bm_l_001_stage_history
+AS SELECT * FROM gold_line_status WHERE project_id = 'BM-L-001';
+CREATE OR REPLACE VIEW vw_genie_bm_l_001_stage_history
 COMMENT 'Genie-scoped stage-history view for project BM-L-001 — v_stage_history filtered to this project only.'
-AS SELECT * FROM css_fevm.burns_piping_poc.v_stage_history WHERE project_id = 'BM-L-001';
-CREATE OR REPLACE VIEW css_fevm.burns_piping_poc.vw_genie_bm_l_001_true_up
+AS SELECT * FROM v_stage_history WHERE project_id = 'BM-L-001';
+CREATE OR REPLACE VIEW vw_genie_bm_l_001_true_up
 COMMENT 'Genie-scoped true-up + change-log view for project BM-L-001 — v_true_up_records joined to v_change_log, filtered to this project only.'
 AS SELECT t.*, c.reason_category, c.reason_text, c.changed_by, c.changed_at
-FROM css_fevm.burns_piping_poc.v_true_up_records t
-LEFT JOIN css_fevm.burns_piping_poc.v_change_log c ON c.true_up_id = t.true_up_id
+FROM v_true_up_records t
+LEFT JOIN v_change_log c ON c.true_up_id = t.true_up_id
 WHERE t.project_id = 'BM-L-001';
-CREATE OR REPLACE VIEW css_fevm.burns_piping_poc.vw_genie_bm_l_001_predictions
+CREATE OR REPLACE VIEW vw_genie_bm_l_001_predictions
 COMMENT 'Genie-scoped ML predictions view for project BM-L-001 — gold_ml_predictions filtered to this project only.'
-AS SELECT * FROM css_fevm.burns_piping_poc.gold_ml_predictions WHERE project_id = 'BM-L-001';
+AS SELECT * FROM gold_ml_predictions WHERE project_id = 'BM-L-001';
 
-CREATE OR REPLACE VIEW css_fevm.burns_piping_poc.vw_genie_bm_l_002_lines
+CREATE OR REPLACE VIEW vw_genie_bm_l_002_lines
 COMMENT 'Genie-scoped lines view for project BM-L-002 — gold_line_status filtered to this project only.'
-AS SELECT * FROM css_fevm.burns_piping_poc.gold_line_status WHERE project_id = 'BM-L-002';
-CREATE OR REPLACE VIEW css_fevm.burns_piping_poc.vw_genie_bm_l_002_stage_history
+AS SELECT * FROM gold_line_status WHERE project_id = 'BM-L-002';
+CREATE OR REPLACE VIEW vw_genie_bm_l_002_stage_history
 COMMENT 'Genie-scoped stage-history view for project BM-L-002 — v_stage_history filtered to this project only.'
-AS SELECT * FROM css_fevm.burns_piping_poc.v_stage_history WHERE project_id = 'BM-L-002';
-CREATE OR REPLACE VIEW css_fevm.burns_piping_poc.vw_genie_bm_l_002_true_up
+AS SELECT * FROM v_stage_history WHERE project_id = 'BM-L-002';
+CREATE OR REPLACE VIEW vw_genie_bm_l_002_true_up
 COMMENT 'Genie-scoped true-up + change-log view for project BM-L-002 — v_true_up_records joined to v_change_log, filtered to this project only.'
 AS SELECT t.*, c.reason_category, c.reason_text, c.changed_by, c.changed_at
-FROM css_fevm.burns_piping_poc.v_true_up_records t
-LEFT JOIN css_fevm.burns_piping_poc.v_change_log c ON c.true_up_id = t.true_up_id
+FROM v_true_up_records t
+LEFT JOIN v_change_log c ON c.true_up_id = t.true_up_id
 WHERE t.project_id = 'BM-L-002';
-CREATE OR REPLACE VIEW css_fevm.burns_piping_poc.vw_genie_bm_l_002_predictions
+CREATE OR REPLACE VIEW vw_genie_bm_l_002_predictions
 COMMENT 'Genie-scoped ML predictions view for project BM-L-002 — gold_ml_predictions filtered to this project only.'
-AS SELECT * FROM css_fevm.burns_piping_poc.gold_ml_predictions WHERE project_id = 'BM-L-002';
+AS SELECT * FROM gold_ml_predictions WHERE project_id = 'BM-L-002';
 
-CREATE OR REPLACE VIEW css_fevm.burns_piping_poc.vw_genie_bm_l_003_lines
+CREATE OR REPLACE VIEW vw_genie_bm_l_003_lines
 COMMENT 'Genie-scoped lines view for project BM-L-003 — gold_line_status filtered to this project only.'
-AS SELECT * FROM css_fevm.burns_piping_poc.gold_line_status WHERE project_id = 'BM-L-003';
-CREATE OR REPLACE VIEW css_fevm.burns_piping_poc.vw_genie_bm_l_003_stage_history
+AS SELECT * FROM gold_line_status WHERE project_id = 'BM-L-003';
+CREATE OR REPLACE VIEW vw_genie_bm_l_003_stage_history
 COMMENT 'Genie-scoped stage-history view for project BM-L-003 — v_stage_history filtered to this project only.'
-AS SELECT * FROM css_fevm.burns_piping_poc.v_stage_history WHERE project_id = 'BM-L-003';
-CREATE OR REPLACE VIEW css_fevm.burns_piping_poc.vw_genie_bm_l_003_true_up
+AS SELECT * FROM v_stage_history WHERE project_id = 'BM-L-003';
+CREATE OR REPLACE VIEW vw_genie_bm_l_003_true_up
 COMMENT 'Genie-scoped true-up + change-log view for project BM-L-003 — v_true_up_records joined to v_change_log, filtered to this project only.'
 AS SELECT t.*, c.reason_category, c.reason_text, c.changed_by, c.changed_at
-FROM css_fevm.burns_piping_poc.v_true_up_records t
-LEFT JOIN css_fevm.burns_piping_poc.v_change_log c ON c.true_up_id = t.true_up_id
+FROM v_true_up_records t
+LEFT JOIN v_change_log c ON c.true_up_id = t.true_up_id
 WHERE t.project_id = 'BM-L-003';
-CREATE OR REPLACE VIEW css_fevm.burns_piping_poc.vw_genie_bm_l_003_predictions
+CREATE OR REPLACE VIEW vw_genie_bm_l_003_predictions
 COMMENT 'Genie-scoped ML predictions view for project BM-L-003 — gold_ml_predictions filtered to this project only.'
-AS SELECT * FROM css_fevm.burns_piping_poc.gold_ml_predictions WHERE project_id = 'BM-L-003';
+AS SELECT * FROM gold_ml_predictions WHERE project_id = 'BM-L-003';
 
-CREATE OR REPLACE VIEW css_fevm.burns_piping_poc.vw_genie_bm_l_004_lines
+CREATE OR REPLACE VIEW vw_genie_bm_l_004_lines
 COMMENT 'Genie-scoped lines view for project BM-L-004 — gold_line_status filtered to this project only.'
-AS SELECT * FROM css_fevm.burns_piping_poc.gold_line_status WHERE project_id = 'BM-L-004';
-CREATE OR REPLACE VIEW css_fevm.burns_piping_poc.vw_genie_bm_l_004_stage_history
+AS SELECT * FROM gold_line_status WHERE project_id = 'BM-L-004';
+CREATE OR REPLACE VIEW vw_genie_bm_l_004_stage_history
 COMMENT 'Genie-scoped stage-history view for project BM-L-004 — v_stage_history filtered to this project only.'
-AS SELECT * FROM css_fevm.burns_piping_poc.v_stage_history WHERE project_id = 'BM-L-004';
-CREATE OR REPLACE VIEW css_fevm.burns_piping_poc.vw_genie_bm_l_004_true_up
+AS SELECT * FROM v_stage_history WHERE project_id = 'BM-L-004';
+CREATE OR REPLACE VIEW vw_genie_bm_l_004_true_up
 COMMENT 'Genie-scoped true-up + change-log view for project BM-L-004 — v_true_up_records joined to v_change_log, filtered to this project only.'
 AS SELECT t.*, c.reason_category, c.reason_text, c.changed_by, c.changed_at
-FROM css_fevm.burns_piping_poc.v_true_up_records t
-LEFT JOIN css_fevm.burns_piping_poc.v_change_log c ON c.true_up_id = t.true_up_id
+FROM v_true_up_records t
+LEFT JOIN v_change_log c ON c.true_up_id = t.true_up_id
 WHERE t.project_id = 'BM-L-004';
-CREATE OR REPLACE VIEW css_fevm.burns_piping_poc.vw_genie_bm_l_004_predictions
+CREATE OR REPLACE VIEW vw_genie_bm_l_004_predictions
 COMMENT 'Genie-scoped ML predictions view for project BM-L-004 — gold_ml_predictions filtered to this project only.'
-AS SELECT * FROM css_fevm.burns_piping_poc.gold_ml_predictions WHERE project_id = 'BM-L-004';
+AS SELECT * FROM gold_ml_predictions WHERE project_id = 'BM-L-004';
 
-CREATE OR REPLACE VIEW css_fevm.burns_piping_poc.vw_genie_bm_l_005_lines
+CREATE OR REPLACE VIEW vw_genie_bm_l_005_lines
 COMMENT 'Genie-scoped lines view for project BM-L-005 — gold_line_status filtered to this project only.'
-AS SELECT * FROM css_fevm.burns_piping_poc.gold_line_status WHERE project_id = 'BM-L-005';
-CREATE OR REPLACE VIEW css_fevm.burns_piping_poc.vw_genie_bm_l_005_stage_history
+AS SELECT * FROM gold_line_status WHERE project_id = 'BM-L-005';
+CREATE OR REPLACE VIEW vw_genie_bm_l_005_stage_history
 COMMENT 'Genie-scoped stage-history view for project BM-L-005 — v_stage_history filtered to this project only.'
-AS SELECT * FROM css_fevm.burns_piping_poc.v_stage_history WHERE project_id = 'BM-L-005';
-CREATE OR REPLACE VIEW css_fevm.burns_piping_poc.vw_genie_bm_l_005_true_up
+AS SELECT * FROM v_stage_history WHERE project_id = 'BM-L-005';
+CREATE OR REPLACE VIEW vw_genie_bm_l_005_true_up
 COMMENT 'Genie-scoped true-up + change-log view for project BM-L-005 — v_true_up_records joined to v_change_log, filtered to this project only.'
 AS SELECT t.*, c.reason_category, c.reason_text, c.changed_by, c.changed_at
-FROM css_fevm.burns_piping_poc.v_true_up_records t
-LEFT JOIN css_fevm.burns_piping_poc.v_change_log c ON c.true_up_id = t.true_up_id
+FROM v_true_up_records t
+LEFT JOIN v_change_log c ON c.true_up_id = t.true_up_id
 WHERE t.project_id = 'BM-L-005';
-CREATE OR REPLACE VIEW css_fevm.burns_piping_poc.vw_genie_bm_l_005_predictions
+CREATE OR REPLACE VIEW vw_genie_bm_l_005_predictions
 COMMENT 'Genie-scoped ML predictions view for project BM-L-005 — gold_ml_predictions filtered to this project only.'
-AS SELECT * FROM css_fevm.burns_piping_poc.gold_ml_predictions WHERE project_id = 'BM-L-005';
+AS SELECT * FROM gold_ml_predictions WHERE project_id = 'BM-L-005';

@@ -28,26 +28,6 @@ const GROUP_TO_ROLE: Record<string, Role> = {
   'Admin Piping': 'Admin',
 };
 
-// Databricks RBAC "assume role" embeds the assumed group's numeric ID (not
-// display name) as an `ag` claim in the forwarded OBO access token — see
-// auth.ts's getRequestIdentity for how this is read, and
-// ARCHITECTURE.md's "assume role" investigation for how this claim was
-// found (only appears via a genuinely fresh OAuth authorization flow with a
-// role explicitly picked during it — the in-session workspace role switcher
-// and the `aid=` URL param against an already-authenticated session both
-// leave the forwarded token, and this claim, completely absent). IDs
-// confirmed directly via `databricks current-user me`; kept as a separate
-// ID-keyed map rather than merged into GROUP_TO_ROLE since it's a different
-// keyspace (id vs. display name) for the same 4 groups — auth.ts uses this
-// to resolve an `ag` claim back to a display name, which then flows through
-// GROUP_TO_ROLE exactly like normal group membership would.
-export const GROUP_ID_TO_NAME: Record<string, string> = {
-  '153366456771408': 'Estimator Piping',
-  '149555560035170': 'Lead Engineer Piping',
-  '153030422207286': 'Design Lead Piping',
-  '151444824573483': 'Admin Piping',
-};
-
 export function eligibleRoles(groups: string[]): Role[] {
   const set = new Set<Role>();
   for (const g of groups) {
@@ -174,10 +154,10 @@ export async function getEffectiveRole(
  * otherwise. Deliberately exact-match only — `Admin` is an administrative
  * role (manage project/role assignments, view everything), not a superset of
  * the workflow roles. An Admin performs a stage action only by switching
- * "view as" to a role they're also really a group-member of (conor.smith,
- * the tester, is in all 4 groups; a real production Admin typically is not,
- * and that's the point — separation of duties stays real, not a superuser
- * bypass dressed up as a role).
+ * "view as" to a role they're also really a group-member of (a test identity
+ * in all 4 groups can exercise every role this way; a real production Admin
+ * typically is not in all 4, and that's the point — separation of duties
+ * stays real, not a superuser bypass dressed up as a role).
  */
 export function requireRole(res: Response, effective: EffectiveRole, allowed: Role[]): boolean {
   if (effective.role && allowed.includes(effective.role)) {

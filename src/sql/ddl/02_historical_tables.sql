@@ -15,8 +15,14 @@
 -- apply inline on a fresh deployment; the already-existing tables in this
 -- catalog were back-filled via ALTER TABLE ... ALTER COLUMN ... COMMENT.
 -- ============================================================================
+--
+-- NOTE: all object names below are bare (not catalog.schema-qualified) --
+-- run `USE CATALOG <catalog>; USE SCHEMA <schema>;` first (or let the
+-- apply_catalog_schema_ddl job do it for you; see SETUP.md). This is what
+-- makes this file portable to any catalog/schema with zero find-and-replace.
+-- ============================================================================
 
-CREATE TABLE IF NOT EXISTS css_fevm.burns_piping_poc.historical_projects (
+CREATE TABLE IF NOT EXISTS historical_projects (
   project_id            STRING  NOT NULL COMMENT 'Unique project identifier. Primary key.',
   project_name          STRING  COMMENT 'Human-readable project name.',
   client_name           STRING  COMMENT 'End client the project is being executed for.',
@@ -29,7 +35,7 @@ CREATE TABLE IF NOT EXISTS css_fevm.burns_piping_poc.historical_projects (
 ) USING DELTA
 COMMENT 'Synthetic closed piping projects (20-30), used only to train the ML model.';
 
-CREATE TABLE IF NOT EXISTS css_fevm.burns_piping_poc.historical_lines (
+CREATE TABLE IF NOT EXISTS historical_lines (
   line_id                         STRING  NOT NULL COMMENT 'Unique piping line identifier. Primary key.',
   project_id                      STRING  COMMENT 'Project this line belongs to. Foreign key to historical_projects.project_id.',
   line_no                         STRING  COMMENT 'Line-list number as shown on the P&ID/isometric (e.g. L-001).',
@@ -64,7 +70,7 @@ CREATE TABLE IF NOT EXISTS css_fevm.burns_piping_poc.historical_lines (
 ) USING DELTA
 COMMENT 'Synthetic historical line-list records, final state (all lines complete).';
 
-CREATE TABLE IF NOT EXISTS css_fevm.burns_piping_poc.historical_stage_history (
+CREATE TABLE IF NOT EXISTS historical_stage_history (
   event_id          STRING  NOT NULL COMMENT 'Unique stage-event identifier. Primary key.',
   line_id           STRING  COMMENT 'Line this event belongs to. Foreign key to historical_lines.line_id.',
   project_id        STRING  COMMENT 'Project this event belongs to (denormalized for convenient filtering).',
@@ -78,7 +84,7 @@ CREATE TABLE IF NOT EXISTS css_fevm.burns_piping_poc.historical_stage_history (
 ) USING DELTA
 COMMENT 'Synthetic full stage-transition history per historical line — this is the ML training signal (stage_entry/exit timestamps).';
 
-CREATE TABLE IF NOT EXISTS css_fevm.burns_piping_poc.historical_true_up_records (
+CREATE TABLE IF NOT EXISTS historical_true_up_records (
   true_up_id                       STRING  NOT NULL COMMENT 'Unique true-up record identifier. Primary key.',
   line_id                          STRING  COMMENT 'Line this true-up applies to. Foreign key to historical_lines.line_id.',
   project_id                       STRING  COMMENT 'Project this true-up belongs to (denormalized for convenient filtering).',
@@ -106,7 +112,7 @@ CREATE TABLE IF NOT EXISTS css_fevm.burns_piping_poc.historical_true_up_records 
 ) USING DELTA
 COMMENT 'Synthetic historical true-up reconciliation records.';
 
-CREATE TABLE IF NOT EXISTS css_fevm.burns_piping_poc.historical_change_log (
+CREATE TABLE IF NOT EXISTS historical_change_log (
   change_id         STRING  NOT NULL COMMENT 'Unique change-log entry identifier. Primary key.',
   true_up_id        STRING  COMMENT 'True-up record this change explains. Foreign key to historical_true_up_records.true_up_id.',
   line_id           STRING  COMMENT 'Line this change applies to (denormalized for convenient filtering).',

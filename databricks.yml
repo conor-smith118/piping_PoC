@@ -32,5 +32,11 @@ targets:
     default: true
     mode: production
     workspace:
-      profile: fevm-css-demo
-      root_path: /Workspace/Users/conor.smith@databricks.com/.bundle/${bundle.name}/${bundle.target}
+      # No `profile:` here on purpose — this bundle is meant to be deployed
+      # into any workspace/account, so the deploying profile is always
+      # passed explicitly: `databricks bundle deploy -t dev --profile
+      # <yours>` (see SETUP.md). `${workspace.current_user.userName}` is a
+      # DABs built-in that resolves to whoever runs the deploy, so every
+      # workspace object this bundle creates lands under the deployer's own
+      # user folder with no path to edit.
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}

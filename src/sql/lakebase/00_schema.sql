@@ -3,7 +3,7 @@
 --
 -- Runs once against the `production` branch / `databricks_postgres` database of
 -- the `burns-piping-poc` Lakebase project:
---   databricks psql --project burns-piping-poc --profile fevm-css-demo -f 00_schema.sql
+--   databricks psql --project burns-piping-poc --profile <your-profile> -f 00_schema.sql
 --
 -- IMPORTANT — column types are restricted to what Lakehouse Sync (Lakebase -> UC
 -- CDC, Beta) can replicate: bool, int2, int4, int8, text, varchar, bpchar, jsonb,

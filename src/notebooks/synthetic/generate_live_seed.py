@@ -9,17 +9,26 @@ is a one-time, deterministic operation.
 
 Usage:
     python3 src/notebooks/synthetic/generate_live_seed.py > src/sql/lakebase/seed_live_data.sql
-    databricks psql --project burns-piping-poc --profile fevm-css-demo -- -f src/sql/lakebase/seed_live_data.sql
+    databricks psql --project <your-lakebase-project> --profile <your-profile> -- -f src/sql/lakebase/seed_live_data.sql
 
 The generated file is checked into the repo and is exactly the "frozen seed
-snapshot" reset_poc (Phase 8) replays — it is NOT re-run with a different
-random seed on reset; the seed value below is fixed for reproducibility.
+snapshot" reset_poc replays — it is NOT re-run with a different random seed
+on reset; the seed value below is fixed for reproducibility.
 
 Story: 5 ACTIVE projects, lines spread across all 6 stages in a funnel shape
 (most lines early, a few fully through) so the Kanban board has cards in every
 column and the dashboard shows a mix of complete/in-flight work from the first
 run — this is what a customer sees before ever clicking "simulate new data".
+
+--test-user-email: the one real per-project role assignment described below
+(projects 1-3, one non-admin role each) is written for this email, so that
+user can exercise the Databricks RBAC "assume role" demo flow (see
+ARCHITECTURE.md) without needing the in-app "view as" switcher. Defaults to
+this reference deployment's test identity; pass your own test user's email
+here, then re-run this script and re-apply the regenerated
+seed_live_data.sql (see SETUP.md) before using a different test user.
 """
+import argparse
 import random
 import numpy as np
 import json
@@ -27,6 +36,11 @@ from datetime import datetime, timedelta
 
 random.seed(777)
 np.random.seed(777)
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--test-user-email", default="conor.smith@databricks.com")
+args = parser.parse_args()
+TEST_USER_EMAIL = args.test_user_email
 
 N_PROJECTS = 5
 
@@ -120,7 +134,7 @@ for i in range(1, N_PROJECTS + 1):
         f"{sql_str(random.choice(PROJECT_TYPES))}, 'ACTIVE', {n_lines}, {sql_ts(created_at)});"
     )
 
-    # role assignments: conor.smith gets exactly one real per-project
+    # role assignments: TEST_USER_EMAIL gets exactly one real per-project
     # assignment per non-admin role, spread across the first 3 projects —
     # NOT a blanket 'Admin' row on every project. Admin access never needs
     # an explicit row here (getEffectiveRole's fallback rule grants it to
@@ -132,15 +146,15 @@ for i in range(1, N_PROJECTS + 1):
     # blanket 'Admin' row doesn't help a session narrowed to just
     # 'Estimator', since getEffectiveRole only honors an assignment whose
     # role is also currently eligible. Projects 4-5 deliberately get no
-    # conor.smith row at all: a narrowed session correctly sees nothing
+    # TEST_USER_EMAIL row at all: a narrowed session correctly sees nothing
     # there (no assignment = no access), which is the whole point of the
     # eligibility/assignment reconciliation rule, not a gap to fill.
-    conor_role_by_index = {1: "Estimator", 2: "Lead Engineer", 3: "Design Lead"}
-    if i in conor_role_by_index:
+    test_user_role_by_index = {1: "Estimator", 2: "Lead Engineer", 3: "Design Lead"}
+    if i in test_user_role_by_index:
         roles_out.append(
             f"INSERT INTO user_project_role (user_email, project_id, role, assigned_by) VALUES "
-            f"({sql_str('conor.smith@databricks.com')}, {sql_str(project_id)}, "
-            f"{sql_str(conor_role_by_index[i])}, 'system');"
+            f"({sql_str(TEST_USER_EMAIL)}, {sql_str(project_id)}, "
+            f"{sql_str(test_user_role_by_index[i])}, 'system');"
         )
     # plus one synthetic Estimator / Lead Engineer / Design Lead per project
     # so the audit trail has believable, distinct actors.

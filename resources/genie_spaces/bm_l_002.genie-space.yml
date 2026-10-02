@@ -6,7 +6,7 @@ resources:
         Curated Genie agent scoped to piping project BM-L-002: line list,
         stage progress, true-up reconciliation, and ML-predicted completion
         times.
-      parent_path: /Workspace/Users/conor.smith@databricks.com/piping_poc_genie
+      parent_path: /Workspace/Users/${workspace.current_user.userName}/piping_poc_genie
       warehouse_id: ${var.warehouse_id}
       file_path: ../../src/genie/bm_l_002.geniespace.json
       # See bm_l_001.genie-space.yml for why this block is required (governs

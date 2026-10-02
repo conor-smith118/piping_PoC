@@ -32,25 +32,31 @@
 -- comments here were also back-filled onto the already-existing tables via
 -- ALTER TABLE ... ALTER COLUMN ... COMMENT.
 -- ============================================================================
+--
+-- NOTE: all object names below are bare (not catalog.schema-qualified) --
+-- run `USE CATALOG <catalog>; USE SCHEMA <schema>;` first (or let the
+-- apply_catalog_schema_ddl job do it for you; see SETUP.md). This is what
+-- makes this file portable to any catalog/schema with zero find-and-replace.
+-- ============================================================================
 
-CREATE OR REPLACE VIEW css_fevm.burns_piping_poc.gold_line_status
+CREATE OR REPLACE VIEW gold_line_status
 COMMENT 'One row per line: v_lines + latest v_stage_history event + true-up variance summary. Always live (see file header) — feeds the Kanban board and dashboard.'
 AS
 WITH latest_event AS (
   SELECT *
   FROM (
     SELECT sh.*, ROW_NUMBER() OVER (PARTITION BY sh.line_id ORDER BY sh.stage_number DESC) AS rn
-    FROM css_fevm.burns_piping_poc.v_stage_history sh
+    FROM v_stage_history sh
   )
   WHERE rn = 1
 ),
 prelim_tu AS (
   SELECT line_id, length_variance_pct AS prelim_length_variance_pct
-  FROM css_fevm.burns_piping_poc.v_true_up_records WHERE true_up_type = 'PRELIMINARY'
+  FROM v_true_up_records WHERE true_up_type = 'PRELIMINARY'
 ),
 final_tu AS (
   SELECT line_id, length_variance_pct AS final_length_variance_pct
-  FROM css_fevm.burns_piping_poc.v_true_up_records WHERE true_up_type = 'FINAL'
+  FROM v_true_up_records WHERE true_up_type = 'FINAL'
 )
 SELECT
   l.line_id, l.project_id, l.line_no, l.service, l.line_class_spec, l.nominal_size_in,
@@ -65,41 +71,41 @@ SELECT
   e.actor_role AS latest_event_actor_role, e.event_timestamp AS latest_event_timestamp,
   p.prelim_length_variance_pct, f.final_length_variance_pct,
   l.data_origin
-FROM css_fevm.burns_piping_poc.v_lines l
+FROM v_lines l
 LEFT JOIN latest_event e ON e.line_id = l.line_id
 LEFT JOIN prelim_tu p ON p.line_id = l.line_id
 LEFT JOIN final_tu f ON f.line_id = l.line_id;
 
-COMMENT ON COLUMN css_fevm.burns_piping_poc.gold_line_status.line_id IS 'Unique piping line identifier. Primary key.';
-COMMENT ON COLUMN css_fevm.burns_piping_poc.gold_line_status.project_id IS 'Project this line belongs to. Foreign key to gold_project_rollup.project_id.';
-COMMENT ON COLUMN css_fevm.burns_piping_poc.gold_line_status.line_no IS 'Line-list number as shown on the P&ID/isometric (e.g. L-001).';
-COMMENT ON COLUMN css_fevm.burns_piping_poc.gold_line_status.service IS 'Process service the line carries (e.g. Cooling Water, Steam, Crude Oil).';
-COMMENT ON COLUMN css_fevm.burns_piping_poc.gold_line_status.line_class_spec IS 'Piping line class / specification governing materials and ratings.';
-COMMENT ON COLUMN css_fevm.burns_piping_poc.gold_line_status.nominal_size_in IS 'Nominal pipe size, in inches (NPS).';
-COMMENT ON COLUMN css_fevm.burns_piping_poc.gold_line_status.material IS 'Pipe material of construction (e.g. CS, SS316, Hastelloy).';
-COMMENT ON COLUMN css_fevm.burns_piping_poc.gold_line_status.estimated_centerline_length_ft IS 'Estimator''s initial centerline length estimate, in feet — the baseline the true-up stages compare the S3D-routed actual length against.';
-COMMENT ON COLUMN css_fevm.burns_piping_poc.gold_line_status.current_stage IS 'Current workflow stage, 1-6.';
-COMMENT ON COLUMN css_fevm.burns_piping_poc.gold_line_status.current_stage_name IS 'Human-readable name of current_stage (e.g. Preliminary True-Up Complete).';
-COMMENT ON COLUMN css_fevm.burns_piping_poc.gold_line_status.is_complete IS 'True once the line has passed stage 6 (Engineer Final Confirmation).';
-COMMENT ON COLUMN css_fevm.burns_piping_poc.gold_line_status.latest_event_type IS 'event_type of this line''s most recent stage-history entry.';
-COMMENT ON COLUMN css_fevm.burns_piping_poc.gold_line_status.latest_event_actor_email IS 'Email of the actor who performed the most recent stage action.';
-COMMENT ON COLUMN css_fevm.burns_piping_poc.gold_line_status.latest_event_actor_role IS 'Role of the actor who performed the most recent stage action.';
-COMMENT ON COLUMN css_fevm.burns_piping_poc.gold_line_status.latest_event_timestamp IS 'Timestamp of the most recent stage action — drives "days in current stage" calculations (see gold_project_rollup.avg_days_in_current_stage).';
-COMMENT ON COLUMN css_fevm.burns_piping_poc.gold_line_status.prelim_length_variance_pct IS 'length_variance_pct from this line''s PRELIMINARY true-up, if performed.';
-COMMENT ON COLUMN css_fevm.burns_piping_poc.gold_line_status.final_length_variance_pct IS 'length_variance_pct from this line''s FINAL true-up, if performed.';
-COMMENT ON COLUMN css_fevm.burns_piping_poc.gold_line_status.data_origin IS 'LIVE (computed from Lakebase CDC at query time) or SYNTHETIC_HISTORICAL (static ML training data).';
+COMMENT ON COLUMN gold_line_status.line_id IS 'Unique piping line identifier. Primary key.';
+COMMENT ON COLUMN gold_line_status.project_id IS 'Project this line belongs to. Foreign key to gold_project_rollup.project_id.';
+COMMENT ON COLUMN gold_line_status.line_no IS 'Line-list number as shown on the P&ID/isometric (e.g. L-001).';
+COMMENT ON COLUMN gold_line_status.service IS 'Process service the line carries (e.g. Cooling Water, Steam, Crude Oil).';
+COMMENT ON COLUMN gold_line_status.line_class_spec IS 'Piping line class / specification governing materials and ratings.';
+COMMENT ON COLUMN gold_line_status.nominal_size_in IS 'Nominal pipe size, in inches (NPS).';
+COMMENT ON COLUMN gold_line_status.material IS 'Pipe material of construction (e.g. CS, SS316, Hastelloy).';
+COMMENT ON COLUMN gold_line_status.estimated_centerline_length_ft IS 'Estimator''s initial centerline length estimate, in feet — the baseline the true-up stages compare the S3D-routed actual length against.';
+COMMENT ON COLUMN gold_line_status.current_stage IS 'Current workflow stage, 1-6.';
+COMMENT ON COLUMN gold_line_status.current_stage_name IS 'Human-readable name of current_stage (e.g. Preliminary True-Up Complete).';
+COMMENT ON COLUMN gold_line_status.is_complete IS 'True once the line has passed stage 6 (Engineer Final Confirmation).';
+COMMENT ON COLUMN gold_line_status.latest_event_type IS 'event_type of this line''s most recent stage-history entry.';
+COMMENT ON COLUMN gold_line_status.latest_event_actor_email IS 'Email of the actor who performed the most recent stage action.';
+COMMENT ON COLUMN gold_line_status.latest_event_actor_role IS 'Role of the actor who performed the most recent stage action.';
+COMMENT ON COLUMN gold_line_status.latest_event_timestamp IS 'Timestamp of the most recent stage action — drives "days in current stage" calculations (see gold_project_rollup.avg_days_in_current_stage).';
+COMMENT ON COLUMN gold_line_status.prelim_length_variance_pct IS 'length_variance_pct from this line''s PRELIMINARY true-up, if performed.';
+COMMENT ON COLUMN gold_line_status.final_length_variance_pct IS 'length_variance_pct from this line''s FINAL true-up, if performed.';
+COMMENT ON COLUMN gold_line_status.data_origin IS 'LIVE (computed from Lakebase CDC at query time) or SYNTHETIC_HISTORICAL (static ML training data).';
 
 -- No mode_stage_name/min_stage_name columns — an earlier version of this
 -- file declared them as an aspirational schema stub, but the job that
 -- actually built this table (now: the view below) never populated them;
 -- the app/dashboard render stage names via their own STAGE_NAMES-equivalent
 -- lookups keyed on the numeric mode_stage/min_stage instead.
-CREATE OR REPLACE VIEW css_fevm.burns_piping_poc.gold_project_rollup
+CREATE OR REPLACE VIEW gold_project_rollup
 COMMENT 'One row per project: stage rollup driving the 6-stage timeline and dashboard KPIs. Always live (see file header).'
 AS
 WITH counts AS (
   SELECT project_id, COUNT(*) AS total_lines, COUNT(*) FILTER (WHERE is_complete) AS lines_complete
-  FROM css_fevm.burns_piping_poc.gold_line_status
+  FROM gold_line_status
   GROUP BY project_id
 ),
 stage_stats AS (
@@ -110,7 +116,7 @@ stage_stats AS (
          MODE(current_stage) AS mode_stage,
          MIN(current_stage) AS min_stage,
          AVG(DATEDIFF(CURRENT_TIMESTAMP(), latest_event_timestamp)) AS avg_days_in_current_stage
-  FROM css_fevm.burns_piping_poc.gold_line_status
+  FROM gold_line_status
   WHERE NOT is_complete
   GROUP BY project_id
 )
@@ -122,24 +128,24 @@ SELECT
   COALESCE(s.min_stage, 6) AS min_stage,
   COALESCE(s.avg_days_in_current_stage, 0.0) AS avg_days_in_current_stage,
   p.data_origin
-FROM css_fevm.burns_piping_poc.v_projects p
+FROM v_projects p
 JOIN counts c ON c.project_id = p.project_id
 LEFT JOIN stage_stats s ON s.project_id = p.project_id;
 
-COMMENT ON COLUMN css_fevm.burns_piping_poc.gold_project_rollup.project_id IS 'Unique project identifier (e.g. BM-L-001). Primary key.';
-COMMENT ON COLUMN css_fevm.burns_piping_poc.gold_project_rollup.project_name IS 'Human-readable project name.';
-COMMENT ON COLUMN css_fevm.burns_piping_poc.gold_project_rollup.client_name IS 'End client the project is being executed for.';
-COMMENT ON COLUMN css_fevm.burns_piping_poc.gold_project_rollup.total_lines IS 'Total number of lines in the project.';
-COMMENT ON COLUMN css_fevm.burns_piping_poc.gold_project_rollup.lines_complete IS 'Number of lines that have reached stage 6 (complete).';
-COMMENT ON COLUMN css_fevm.burns_piping_poc.gold_project_rollup.pct_lines_complete IS 'lines_complete divided by total_lines.';
-COMMENT ON COLUMN css_fevm.burns_piping_poc.gold_project_rollup.mode_stage IS 'Most common current_stage among this project''s incomplete lines — the headline marker on the 6-stage timeline.';
-COMMENT ON COLUMN css_fevm.burns_piping_poc.gold_project_rollup.min_stage IS 'Earliest current_stage among this project''s incomplete lines — the laggard.';
-COMMENT ON COLUMN css_fevm.burns_piping_poc.gold_project_rollup.avg_days_in_current_stage IS 'Average days incomplete lines have sat in their current stage, measured from gold_line_status.latest_event_timestamp.';
-COMMENT ON COLUMN css_fevm.burns_piping_poc.gold_project_rollup.data_origin IS 'LIVE (computed from Lakebase CDC at query time) or SYNTHETIC_HISTORICAL (static ML training data).';
+COMMENT ON COLUMN gold_project_rollup.project_id IS 'Unique project identifier (e.g. BM-L-001). Primary key.';
+COMMENT ON COLUMN gold_project_rollup.project_name IS 'Human-readable project name.';
+COMMENT ON COLUMN gold_project_rollup.client_name IS 'End client the project is being executed for.';
+COMMENT ON COLUMN gold_project_rollup.total_lines IS 'Total number of lines in the project.';
+COMMENT ON COLUMN gold_project_rollup.lines_complete IS 'Number of lines that have reached stage 6 (complete).';
+COMMENT ON COLUMN gold_project_rollup.pct_lines_complete IS 'lines_complete divided by total_lines.';
+COMMENT ON COLUMN gold_project_rollup.mode_stage IS 'Most common current_stage among this project''s incomplete lines — the headline marker on the 6-stage timeline.';
+COMMENT ON COLUMN gold_project_rollup.min_stage IS 'Earliest current_stage among this project''s incomplete lines — the laggard.';
+COMMENT ON COLUMN gold_project_rollup.avg_days_in_current_stage IS 'Average days incomplete lines have sat in their current stage, measured from gold_line_status.latest_event_timestamp.';
+COMMENT ON COLUMN gold_project_rollup.data_origin IS 'LIVE (computed from Lakebase CDC at query time) or SYNTHETIC_HISTORICAL (static ML training data).';
 
 -- ml_stage_transition_features / gold_ml_predictions stay physical Delta
 -- tables, built by src/notebooks/ml/*.py — unchanged by this file.
-CREATE TABLE IF NOT EXISTS css_fevm.burns_piping_poc.ml_stage_transition_features (
+CREATE TABLE IF NOT EXISTS ml_stage_transition_features (
   project_id                       STRING  COMMENT 'Project the line in this row belongs to.',
   line_id                          STRING  COMMENT 'Line this stage-transition row describes.',
   stage_number                     INT     COMMENT 'Workflow stage number, 1-6, this row is a transition for.',
@@ -161,7 +167,7 @@ CREATE TABLE IF NOT EXISTS css_fevm.burns_piping_poc.ml_stage_transition_feature
 ) USING DELTA
 COMMENT 'Training/scoring grain: one row per line x stage-transition. Historical rows are fully-labeled training data; live rows are in-flight and scored by batch inference.';
 
-CREATE TABLE IF NOT EXISTS css_fevm.burns_piping_poc.gold_ml_predictions (
+CREATE TABLE IF NOT EXISTS gold_ml_predictions (
   project_id                     STRING  COMMENT 'Project the predicted line belongs to.',
   line_id                        STRING  COMMENT 'Line this prediction is for.',
   current_stage                  INT     COMMENT 'The line''s current_stage at the time this prediction was scored.',

@@ -1,11 +1,13 @@
 -- ============================================================================
 -- Grant the app's service principal access to the pre-existing Lakebase
--- tables. Run ONCE, after the app's first `databricks apps deploy`, as the
--- Lakebase project owner (conor.smith — already has full access, no extra
--- role needed).
+-- tables. Run ONCE, after the app's first `databricks apps deploy`, as
+-- whichever identity owns the Lakebase project (typically whoever ran
+-- `databricks psql ... -f 00_schema.sql` — already has full access, no
+-- extra role needed).
 --
 -- Why this step exists: the 6 tables in `public` already exist (created in
--- Phase 0 by the project owner, then seeded with historical/live data). The
+-- initial setup by the project owner, then seeded with historical/live
+-- data). The
 -- app's SP gets CAN_CONNECT_AND_CREATE on the Lakebase resource automatically
 -- on deploy (see resources/app.burns_piping_poc.yml), but per the
 -- databricks-lakebase / AppKit docs, CAN_CONNECT_AND_CREATE only lets the SP
@@ -17,11 +19,11 @@
 -- this app writes.
 --
 -- Get the SP client ID:
---   databricks apps get burns-piping-poc --profile fevm-css-demo -o json \
+--   databricks apps get burns-piping-poc --profile <your-profile> -o json \
 --     | jq -r '.service_principal_client_id'
 --
 -- Run:
---   databricks psql --project burns-piping-poc --profile fevm-css-demo -- \
+--   databricks psql --project burns-piping-poc --profile <your-profile> -- \
 --     -v sp_client_id='<SP_CLIENT_ID>' -f src/sql/lakebase/01_grant_app_access.sql
 -- ============================================================================
 
