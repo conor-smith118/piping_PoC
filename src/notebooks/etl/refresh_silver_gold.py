@@ -78,7 +78,7 @@ def latest_state(cdc_table: str, pk_cols: list[str]):
     return df.drop("rn", *CDC_META_COLS)
 
 
-def refresh_live_table(cdc_table: str, live_table: str, pk_cols: list[str]):
+def refresh_live_table(cdc_table: str, live_table: str, pk_cols: list[str]) -> str:
     source_df = latest_state(cdc_table, pk_cols)
     target = DeltaTable.forName(spark, live_table)
     merge_condition = " AND ".join([f"t.{c} = s.{c}" for c in pk_cols])
@@ -91,8 +91,11 @@ def refresh_live_table(cdc_table: str, live_table: str, pk_cols: list[str]):
         .execute()
     )
     n = spark.table(live_table).count()
-    print(f"{live_table}: refreshed from {cdc_table} -> {n} rows")
+    line = f"{live_table}: refreshed from {cdc_table} -> {n} rows"
+    print(line)
+    return line
 
 
-for cdc_table, live_table, pk_cols in REFRESH_MAP:
-    refresh_live_table(cdc_table, live_table, pk_cols)
+summary_lines = [refresh_live_table(cdc_table, live_table, pk_cols) for cdc_table, live_table, pk_cols in REFRESH_MAP]
+summary = "refresh_silver_gold: " + "; ".join(summary_lines)
+dbutils.notebook.exit(summary)

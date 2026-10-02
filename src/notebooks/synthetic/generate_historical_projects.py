@@ -402,13 +402,15 @@ print("Historical synthetic data written.")
 
 # COMMAND ----------
 
-display(spark.sql(f"""
+counts_df = spark.sql(f"""
   SELECT 'projects' AS tbl, COUNT(*) AS n FROM {CATALOG}.{SCHEMA}.historical_projects
   UNION ALL SELECT 'lines', COUNT(*) FROM {CATALOG}.{SCHEMA}.historical_lines
   UNION ALL SELECT 'stage_history', COUNT(*) FROM {CATALOG}.{SCHEMA}.historical_stage_history
   UNION ALL SELECT 'true_up_records', COUNT(*) FROM {CATALOG}.{SCHEMA}.historical_true_up_records
   UNION ALL SELECT 'change_log', COUNT(*) FROM {CATALOG}.{SCHEMA}.historical_change_log
-"""))
+""")
+display(counts_df)
+counts_text = "; ".join(f"{r['tbl']}={r['n']}" for r in counts_df.collect())
 
 # COMMAND ----------
 
@@ -416,7 +418,7 @@ display(spark.sql(f"""
 # true-up stage durations than small-bore carbon-steel lines. (unix_timestamp
 # diff, not timestamp subtraction, to avoid relying on Spark's interval/EXTRACT
 # support for sub-day precision.)
-display(spark.sql(f"""
+signal_df = spark.sql(f"""
   WITH stage_gaps AS (
     SELECT sh.line_id, sh.stage_number,
            (unix_timestamp(sh.event_timestamp)
@@ -432,4 +434,19 @@ display(spark.sql(f"""
   WHERE s.stage_number IN (3,5)
   GROUP BY 1, 2
   ORDER BY 1, 2
-"""))
+""")
+display(signal_df)
+signal_text = " | ".join(
+    f"large_bore={r['large_bore']},exotic={r['exotic_material']} -> avg {r['avg_true_up_stage_hours']}h (n={r['n']})"
+    for r in signal_df.collect()
+)
+
+# COMMAND ----------
+
+summary = (
+    f"generate_historical_projects: {N_PROJECTS} projects, seed={SEED}. "
+    f"Row counts: {counts_text}. "
+    f"True-up stage duration signal (large-bore/exotic vs. small-bore/carbon-steel): {signal_text}."
+)
+print(summary)
+dbutils.notebook.exit(summary)

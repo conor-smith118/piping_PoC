@@ -122,3 +122,10 @@ cur.close()
 conn.close()
 print("Reset committed. Run/wait for refresh_silver_gold (chained automatically by this job) "
       "to see the restored baseline reflected in Delta/dashboards/Genie.")
+
+summary = (
+    f"reset_poc: deleted rows (before counts: {before_counts}), replayed {n_statements} INSERT "
+    f"statements from the frozen seed file, restored row counts: {after_counts}."
+)
+print(summary)
+dbutils.notebook.exit(summary)

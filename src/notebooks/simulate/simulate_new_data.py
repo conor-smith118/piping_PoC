@@ -309,3 +309,13 @@ cur.close()
 conn.close()
 print("Committed. Lakehouse Sync will pick up these changes on its own schedule; "
       "run/wait for refresh_silver_gold (chained automatically by this job) to see them in Delta.")
+
+summary = (
+    f"simulate_new_data: advanced {len(sample)} in-flight lines "
+    f"({', '.join(f'stage {k}: {v}' for k, v in sorted(advanced_counts.items())) or 'none'}); "
+    f"inserted {N_NEW_LINES} new stage-1 lines across {len(new_lines_by_project)} projects "
+    f"({new_lines_by_project}). Committed straight to Lakebase Postgres (same path the app itself "
+    f"writes through) — real CDC propagation, not a simulated/mocked write."
+)
+print(summary)
+dbutils.notebook.exit(summary)

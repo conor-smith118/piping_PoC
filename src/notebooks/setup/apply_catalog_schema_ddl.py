@@ -106,4 +106,6 @@ for fname in DDL_FILES:
         spark.sql(stmt)
     total_run += len(statements)
 
-print(f"Done. Ran {total_run} statements across {len(DDL_FILES)} files against {CATALOG}.{SCHEMA}.")
+summary = f"Done. Ran {total_run} statements across {len(DDL_FILES)} files against {CATALOG}.{SCHEMA}."
+print(summary)
+dbutils.notebook.exit(summary)

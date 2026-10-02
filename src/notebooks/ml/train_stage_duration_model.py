@@ -266,3 +266,13 @@ spark.createDataFrame(
     f"{CATALOG}.{SCHEMA}._ml_model_metadata"
 )
 print(f"Saved {len(X.columns)} feature columns to _ml_model_metadata for batch inference to reuse.")
+
+summary = (
+    f"train_stage_duration_model: {len(train_pdf)} training rows ({X_train.shape[0]} train / "
+    f"{X_test.shape[0]} test) from {len(study.trials)} Optuna trials. "
+    f"Best params: {study.best_params}. "
+    f"Held-out performance: MAE={mae_hours:.1f} hours (MAE log-scale={mae_log:.4f}, R2 log-scale={r2:.3f}). "
+    f"Registered {MODEL_NAME} version {info.registered_model_version}, aliased @prod."
+)
+print(summary)
+dbutils.notebook.exit(summary)

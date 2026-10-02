@@ -164,4 +164,19 @@ print(predictions_pdf.head())
 spark.createDataFrame(predictions_pdf).write.mode("overwrite").saveAsTable(
     f"{CATALOG}.{SCHEMA}.gold_ml_predictions"
 )
-print(f"gold_ml_predictions: {spark.table(f'{CATALOG}.{SCHEMA}.gold_ml_predictions').count()} rows")
+n_written = spark.table(f"{CATALOG}.{SCHEMA}.gold_ml_predictions").count()
+print(f"gold_ml_predictions: {n_written} rows")
+
+sample = predictions_pdf.sort_values("predicted_remaining_hours", ascending=False).head(3)
+sample_text = "; ".join(
+    f"{r.line_id} (stage {r.current_stage}): {r.predicted_remaining_hours}h remaining, "
+    f"ETA {r.predicted_completion_ts}"
+    for r in sample.itertuples()
+)
+summary = (
+    f"batch_score_predictions: scored {len(predictions_pdf)} in-flight lines using "
+    f"{MODEL_NAME}@prod, wrote {n_written} rows to gold_ml_predictions. "
+    f"Longest-remaining examples: {sample_text}."
+)
+print(summary)
+dbutils.notebook.exit(summary)
